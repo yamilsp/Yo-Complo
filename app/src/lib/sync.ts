@@ -3,7 +3,7 @@ import { store } from './store';
 import type { AnyRec } from './types';
 
 /**
- * Sincronización con Supabase (Postgres). Tabla única `records` con un documento
+ * Sincronización con Supabase (Postgres). Tabla única `yc_records` con un documento
  * JSON por registro. Subimos lo pendiente y bajamos lo cambiado desde el último cursor.
  * Sin configuración, la app sigue funcionando en modo local.
  */
@@ -137,7 +137,7 @@ async function doSync() {
         updated_at: r.updatedAt,
         deleted: !!r.deleted,
       }));
-      const { error } = await c.from('records').upsert(rows, { onConflict: 'user_id,id' });
+      const { error } = await c.from('yc_records').upsert(rows, { onConflict: 'user_id,id' });
       if (error) throw new Error(error.message);
       store.markClean(chunk);
     }
@@ -147,7 +147,7 @@ async function doSync() {
     let from = 0;
     for (;;) {
       const { data, error } = await c
-        .from('records')
+        .from('yc_records')
         .select('data, server_ts')
         .gt('server_ts', since)
         .order('server_ts', { ascending: true })
@@ -166,7 +166,7 @@ async function doSync() {
     const msg = String((e as Error).message ?? e);
     set({
       busy: false,
-      error: /relation .*records.* does not exist|Could not find the table/i.test(msg)
+      error: /relation .*yc_records.* does not exist|Could not find the table/i.test(msg)
         ? 'Falta crear la tabla en Supabase (paso 2 de la guía: pegar el SQL).'
         : /fetch/i.test(msg)
           ? 'Sin conexión. Los cambios quedan guardados y se suben después.'

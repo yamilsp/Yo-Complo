@@ -1,7 +1,7 @@
 -- Yo Complo: esquema de sincronización.
 -- Pegar completo en Supabase > SQL Editor > New query > Run. Se puede ejecutar más de una vez.
 
-create table if not exists public.records (
+create table if not exists public.yc_records (
   user_id    uuid    not null default auth.uid() references auth.users(id) on delete cascade,
   id         text    not null,
   kind       text    not null,
@@ -12,10 +12,10 @@ create table if not exists public.records (
   primary key (user_id, id)
 );
 
-create index if not exists records_user_server_ts on public.records (user_id, server_ts);
+create index if not exists yc_records_user_server_ts on public.yc_records (user_id, server_ts);
 
 -- Gana la última escritura: si llega una versión más vieja, se ignora.
-create or replace function public.records_lww() returns trigger
+create or replace function public.yc_records_lww() returns trigger
 language plpgsql as $$
 begin
   if tg_op = 'UPDATE' and new.updated_at < old.updated_at then
@@ -25,15 +25,15 @@ begin
   return new;
 end $$;
 
-drop trigger if exists records_lww on public.records;
-create trigger records_lww before insert or update on public.records
-for each row execute function public.records_lww();
+drop trigger if exists yc_records_lww on public.yc_records;
+create trigger yc_records_lww before insert or update on public.yc_records
+for each row execute function public.yc_records_lww();
 
 -- Cada usuario solo ve y modifica sus propios datos.
-alter table public.records enable row level security;
+alter table public.yc_records enable row level security;
 
-drop policy if exists "own records" on public.records;
-create policy "own records" on public.records
+drop policy if exists "yc own records" on public.yc_records;
+create policy "yc own records" on public.yc_records
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
