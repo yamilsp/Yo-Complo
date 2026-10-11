@@ -1,0 +1,13 @@
+{
+  "name": "Yo Complo",
+  "short_name": "Yo Complo",
+  "description": "Sistema personal de ejecución",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f6f4",
+  "theme_color": "#1f6f4a",
+  "lang": "es-AR",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
