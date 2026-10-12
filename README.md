@@ -7,7 +7,11 @@ App web instalable (PWA) que conecta objetivos → metas de 30 días → proyect
 - **Test inicial** de 9 preguntas que arma tu plan (se puede rehacer en Ajustes).
 - **Hoy**: primero la caja (lo que genera plata), después 1 acción por área (ingreso extra, salud, social, imagen). Botón **"¿Qué hago ahora?"** con regla de 2 minutos y respuesta a tu excusa.
 - **Semana**: plata de la semana contra tu mínimo, 3 resultados, 1 experimento de 7 días a la vez, efecto compuesto (28 días).
-- **Mente**: vaciás la cabeza y cada cosa se clasifica con Eisenhower (hacer / agendar / delegar / eliminar / idea en espera).
+- **Ordenar** (asistente sin IA): pegás o dictás tus tareas; se sugiere área y cuadrante de Eisenhower (prioridad: plata → relaciones → salud) y se corrige con un toque.
+- **Tareas fijas** con día y hora (marketing, finanzas, casa, viandas…) y botón "Cambió el día" (lluvia, más trabajo, imprevisto).
+- **Registro diario** en el cierre: mensajes a clientes, horas enfocadas, evento social, celular de ocio, gym, sueño. El coach propone cómo bajar la fricción de los hábitos buenos y subirla en los malos.
+- **Google Calendar**: "Agregar a Google Calendar" en cada tarea (sin configuración) y lectura de eventos con la dirección secreta iCal (función `app/api/ical.js` en Vercel).
+- **Atajos del ícono** (mantener apretado): ¿Qué hago ahora?, Registrar el día, Ordenar.
 - **Coach** basado en *Hábitos Atómicos* y *El Efecto Compuesto*: detecta en qué venís fallando y qué excusa repetís, y propone cómo facilitarlo.
 
 ## Modo avanzado (Etapa 1 / MVP original)

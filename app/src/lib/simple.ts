@@ -11,7 +11,7 @@ import { addDays, daysBetween, fromISO, weekStart } from './dates';
  * y El Efecto Compuesto (pequeñas acciones constantes, medir para ver la tendencia).
  */
 
-export type Area = 'caja' | 'experimento' | 'salud' | 'social' | 'imagen' | 'extra';
+export type Area = 'caja' | 'experimento' | 'salud' | 'social' | 'imagen' | 'fijo' | 'extra';
 export type Excuse = 'ganas' | 'plata' | 'celular' | 'cansado' | 'manana' | 'investigar' | 'perfecto' | 'imprevisto';
 export type Tone = 'duro' | 'firme' | 'datos';
 export type Energy = 'bien' | 'normal' | 'bajo';
@@ -44,6 +44,32 @@ export interface Profile extends Base {
   imagen: string;
   imagenDay: number;
   tone: Tone;
+  /** Meta de ingresos a 3 meses (la del papel: 4 M). */
+  incomeTarget?: number;
+  /** Tareas recurrentes con día y horario fijo. */
+  fixed?: FixedTask[];
+  /** Límite de horas de celular de ocio por día. */
+  phoneLimit?: number;
+  /** Dirección privada iCal de Google Calendar (solo lectura). */
+  icalUrl?: string;
+}
+
+export interface FixedTask {
+  id: string;
+  title: string;
+  day: number;
+  time: string;
+  minutes: number;
+}
+
+/** Registro de la noche: lo que mueve las metas, en orden de prioridad (plata, relaciones, salud). */
+export interface DayLog {
+  messages: number;
+  focusH: number;
+  social: boolean;
+  phoneH: number;
+  gym: boolean;
+  sleepH: number;
 }
 
 export interface PlanItem {
@@ -53,6 +79,7 @@ export interface PlanItem {
   minutes: number;
   min: string;
   done: boolean;
+  time?: string;
 }
 
 export interface DayPlan extends Base {
@@ -62,6 +89,8 @@ export interface DayPlan extends Base {
   energy?: Energy;
   closed: boolean;
   excuse?: Excuse;
+  log?: DayLog;
+  changed?: 'lluvia' | 'mas_trabajo' | 'imprevisto';
 }
 
 export interface WeekRec extends Base {
@@ -76,6 +105,7 @@ export interface Note extends Base {
   kind: 'snote';
   text: string;
   quadrant?: Quadrant;
+  area?: Area;
   status: 'open' | 'done' | 'archived';
 }
 
@@ -89,6 +119,7 @@ export const AREA: Record<Area, { label: string; color: string }> = {
   salud: { label: 'Salud', color: 'orange' },
   social: { label: 'Social', color: 'pink' },
   imagen: { label: 'Imagen', color: 'purple' },
+  fijo: { label: 'Fija', color: 'gray' },
   extra: { label: 'Otro', color: 'gray' },
 };
 
@@ -168,8 +199,10 @@ export function generatePlan(p: Profile, date: string): PlanItem[] {
   if (p.socialDay === dow && p.social) sec.push({ area: 'social', title: p.social, minutes: 60, min: 'Escribirle a 1 persona para verse' });
   if (p.imagenDay === dow && p.imagen) sec.push({ area: 'imagen', title: p.imagen, minutes: 45, min: '10 minutos' });
 
-  // Días de Roble: máximo 2 secundarias; días libres: máximo 3.
-  const all = [...items, ...sec.slice(0, roble ? 2 : 3)];
+  // Días de Roble: máximo 2 secundarias; días libres: máximo 3. Las fijas van aparte.
+  const fixed = (p.fixed ?? []).filter((f) => f.day === dow).sort((a, b) => a.time.localeCompare(b.time))
+    .map((f) => ({ area: 'fijo' as Area, title: f.title, minutes: f.minutes, min: 'Versión corta: 15 minutos', time: f.time }));
+  const all = [...items, ...sec.slice(0, roble ? 2 : 3), ...fixed];
   return all.map((x) => ({ ...x, id: iid(date), done: false }));
 }
 
@@ -233,6 +266,7 @@ const AREA_FIXES: Record<Area, string[]> = {
     'Sumate a algo con fecha fija (grupo de running, fútbol, idiomas): la agenda decide por vos.',
     'Mínimo: 1 mensaje para proponer un plan concreto.',
   ],
+  fijo: ['Hacela en su día y horario, aunque sea la versión corta. Lo que tiene lugar fijo no compite con lo demás.'],
   imagen: [
     'Una sola mejora por semana, agendada (corte, ropa, postura).',
     'Dejá preparada la ropa del día siguiente.',
@@ -282,7 +316,7 @@ export function simpleCoach(p: Profile, plans: DayPlan[], weeks: WeekRec[], toda
   const duro = p.tone === 'duro';
 
   // Áreas que vienen fallando.
-  const areas: Area[] = ['caja', 'experimento', 'salud', 'social', 'imagen'];
+  const areas: Area[] = ['caja', 'experimento', 'salud', 'social', 'imagen', 'fijo'];
   for (const a of areas) {
     const its = recent.flatMap((d) => d.items.filter((i) => i.area === a));
     if (its.length < 3) continue;
@@ -381,4 +415,237 @@ export function cajaStreak(plans: DayPlan[], today: string): number {
     d = addDays(d, -1);
   }
   return n;
+}
+
+/* ------------------------------------------------------------------ */
+/* Días fijos, registro diario, cambios de plan y asistente Eisenhower */
+/* ------------------------------------------------------------------ */
+
+/** Propuesta inicial de tareas fijas. El usuario la cambia en el test. */
+export const DEFAULT_FIXED: FixedTask[] = [
+  { id: 'fx-mkt', title: 'Armar calendario de marketing de la semana', day: 1, time: '09:00', minutes: 60 },
+  { id: 'fx-fin', title: 'Finanzas personales: ingresos, gastos y ahorro', day: 0, time: '18:00', minutes: 30 },
+  { id: 'fx-viandas', title: 'Compras y viandas de la semana', day: 0, time: '11:00', minutes: 120 },
+  { id: 'fx-casa', title: 'Casa: limpieza y reparaciones', day: 6, time: '10:00', minutes: 90 },
+  { id: 'fx-auto', title: 'Limpiar el auto', day: 6, time: '12:00', minutes: 45 },
+  { id: 'fx-ropa', title: 'Lavar ropa', day: 3, time: '20:00', minutes: 20 },
+];
+
+export function withDefaults(p: Profile): Profile {
+  return { ...p, incomeTarget: p.incomeTarget ?? 4_000_000, fixed: p.fixed ?? DEFAULT_FIXED, phoneLimit: p.phoneLimit ?? 1 };
+}
+
+export const EMPTY_LOG: DayLog = { messages: 0, focusH: 0, social: false, phoneH: 0, gym: false, sleepH: 0 };
+
+export type ChangeReason = NonNullable<DayPlan['changed']>;
+
+/**
+ * "Hoy cambió el día": reacomoda el plan sin rearmar todo.
+ *  - lluvia: no hay jornada afuera → esas horas van a clientes y a tareas fijas.
+ *  - más trabajo: solo caja mínima y fijas cortas; secundarias afuera.
+ *  - imprevisto: todo a versión mínima, máximo 3 cosas.
+ */
+export function replan(items: PlanItem[], reason: ChangeReason, date: string): PlanItem[] {
+  const pending = items.filter((i) => !i.done);
+  const done = items.filter((i) => i.done);
+  if (reason === 'lluvia') {
+    const out = pending.filter((i) => !/^Jornada/.test(i.title));
+    if (!out.some((i) => i.area === 'caja' && i.minutes >= 90))
+      out.unshift({ id: iid(date), area: 'caja', title: 'Día de lluvia: 2 h de clientes (mensajes, presupuestos, seguimiento)', minutes: 120, min: '15 min: 3 mensajes', done: false });
+    out.push({ id: iid(date), area: 'caja', title: 'Reprogramar con los clientes los trabajos de hoy', minutes: 20, min: 'Avisar al primer cliente', done: false });
+    return [...done, ...out];
+  }
+  if (reason === 'mas_trabajo') {
+    // Se conserva qué es cada tarea; solo baja a su versión corta (el mínimo se ve en "¿Qué hago ahora?").
+    return [...done, ...pending.filter((i) => i.area === 'caja' || i.area === 'fijo').map((i) => (/^Jornada/.test(i.title) ? i : { ...i, minutes: Math.min(i.minutes, 15) }))];
+  }
+  return [...done, ...pending.slice(0, 3).map((i) => ({ ...i, minutes: Math.min(i.minutes, 15) }))];
+}
+
+/* Asistente: separa la lista, sugiere área y cuadrante; el usuario corrige con un toque. */
+
+const KW: [Area, RegExp][] = [
+  ['caja', /client|presupuest|cobr|factur|vend|venta|mensaj|prospect|roble|marketing|publicar|precio|propuesta|llamar a|seguimiento|empleo|cv|postul|consultor|inmobiliari|consorcio/i],
+  ['social', /amig|evento|cumple|salida|grupo|club|reuni[oó]n|conocer|familia|novia|cita|after|asado/i],
+  ['salud', /gym|gimnas|m[eé]dic|turno|correr|caminar|vianda|comida|dormir|dentista|f[uú]tbol|entren/i],
+  ['experimento', /canci[oó]n|app|libro|curso|videojuego|juego/i],
+  ['fijo', /limpi|lavar|ropa sucia|reparar|arregl|super|compras|banco|tr[aá]mite|pagar|factura de|impuesto/i],
+  ['imagen', /ropa|corte|pelo|barba|zapatill|outfit/i],
+];
+const URGENT = /\bhoy\b|ma[nñ]ana|urgente|vence|antes de|ya\b|\d{1,2}\s?(hs|h)\b/i;
+
+export function splitTasks(text: string): string[] {
+  return text
+    .split(/\n|;|•/)
+    .map((t) => t.replace(/^\s*([-*·]|\d+[.)])\s*/, '').trim())
+    .filter((t) => t.length > 1);
+}
+
+export function guessArea(text: string): Area {
+  for (const [a, re] of KW) if (re.test(text)) return a;
+  return 'extra';
+}
+
+/** Prioridad por área según tus metas: plata, después relaciones, después salud. */
+export const AREA_RANK: Record<Area, number> = { caja: 0, social: 1, salud: 2, experimento: 3, fijo: 4, imagen: 5, extra: 6 };
+
+export function suggestQuadrant(text: string, area: Area): Quadrant {
+  if (area === 'experimento') return 'idea';
+  // Tareas de la casa: importantes pero se agendan en su día fijo, salvo que sean urgentes.
+  const important = area === 'caja' || area === 'social' || area === 'salud' || area === 'fijo';
+  return quadrant(important, URGENT.test(text));
+}
+
+/* Hábitos: menos fricción para los buenos, más para los malos (Hábitos Atómicos, 3ª ley invertida). */
+export const PHONE_FRICTION = [
+  'De noche el celular carga fuera de la pieza. Despertador aparte.',
+  'Sacá de la pantalla de inicio las apps de redes y de video: que abrirlas cueste 3 pasos.',
+  'Activá la escala de grises en Bienestar digital; la pantalla engancha mucho menos.',
+  'Poné límites de app en Bienestar digital (30 min para redes) y un modo concentración en tus horas de trabajo.',
+  'Durante el bloque de trabajo el celular queda en otra habitación, en silencio.',
+];
+
+export const GOOD_HABIT_EASIER: Record<'messages' | 'focus' | 'gym' | 'social', string[]> = {
+  messages: [
+    'Dejá armada la noche anterior la lista de 10 contactos y un mensaje modelo para copiar y pegar.',
+    'Apilalo: "Después del primer mate, mando 3 mensajes". Antes de abrir redes.',
+  ],
+  focus: [
+    'Elegí la franja de mañana a la mañana, según el clima y el trabajo, y cargala en el calendario.',
+    'Empezá con 25 minutos y la versión mínima. Arrancar es lo que cuesta.',
+  ],
+  gym: ['Bolso del gym armado y en la puerta.', 'Mismo día y hora fija: que no haya que decidir.'],
+  social: [
+    'Buscá el evento de la semana el domingo y anotalo con horario. Un evento nuevo por semana.',
+    'Ir a lo mismo todas las semanas (grupo, club) baja la fricción: no hay que decidir cada vez.',
+  ],
+};
+
+/** Coach del registro diario: compara con tus metas y propone cómo facilitarlas. */
+export function logCoach(p: Profile, plans: DayPlan[], today: string): Insight[] {
+  const out: Insight[] = [];
+  const from = addDays(today, -7);
+  const logs = plans.filter((x) => x.date >= from && x.date < today && x.log).map((x) => x.log!);
+  if (logs.length < 3) return out;
+  const avg = (f: (l: DayLog) => number) => logs.reduce((a, l) => a + f(l), 0) / logs.length;
+  const limit = p.phoneLimit ?? 1;
+  const phone = avg((l) => l.phoneH);
+  const focus = avg((l) => l.focusH);
+  const msgs = logs.reduce((a, l) => a + l.messages, 0);
+  if (phone > limit) {
+    out.push({
+      id: 'phone', level: phone >= limit * 3 || phone >= 3 ? 3 : 2,
+      title: 'El celular te está comiendo el día',
+      evidence: `Promedio ${phone.toFixed(1).replace('.', ',')} h/día de ocio (tu límite: ${limit} h). Trabajo enfocado: ${focus.toFixed(1).replace('.', ',')} h/día.`,
+      fixes: PHONE_FRICTION.slice(0, 4),
+    });
+  }
+  if (msgs < logs.length * 3) {
+    out.push({
+      id: 'messages', level: 3,
+      title: 'Pocos mensajes a clientes',
+      evidence: `${msgs} mensajes en ${logs.length} días registrados. Sin mensajes no hay presupuestos.`,
+      fixes: GOOD_HABIT_EASIER.messages,
+    });
+  }
+  if (focus < 2) {
+    out.push({ id: 'focus', level: 2, title: 'Poco trabajo enfocado', evidence: `Promedio ${focus.toFixed(1).replace('.', ',')} h/día.`, fixes: GOOD_HABIT_EASIER.focus });
+  }
+  const ws = weekStart(today);
+  const socialWeek = plans.filter((x) => x.date >= ws && x.log?.social).length;
+  if (fromISO(today).getDay() >= 4 && socialWeek === 0) {
+    out.push({ id: 'social', level: 1, title: 'Todavía no fuiste a ningún evento esta semana', evidence: 'Meta: 1 evento o actividad nueva por semana.', fixes: GOOD_HABIT_EASIER.social });
+  }
+  return out;
+}
+
+/* Google Calendar */
+
+const pad = (n: number) => String(n).padStart(2, '0');
+function gcalStamp(date: string, time: string, addMin = 0): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const [hh, mm] = time.split(':').map(Number);
+  const t = new Date(y, m - 1, d, hh, mm + addMin);
+  return `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}T${pad(t.getHours())}${pad(t.getMinutes())}00`;
+}
+
+/** Link que abre Google Calendar con el evento precargado. No requiere permisos. */
+export function gcalLink(title: string, date: string, time: string, minutes: number): string {
+  const q = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: title,
+    dates: `${gcalStamp(date, time)}/${gcalStamp(date, time, Math.max(15, minutes))}`,
+    ctz: 'America/Argentina/Buenos_Aires',
+    details: 'Creado desde Yo Complo',
+  });
+  return 'https://calendar.google.com/calendar/render?' + q.toString();
+}
+
+export interface CalEvent {
+  title: string;
+  start: string; // HH:MM o '' si es de día completo
+  end: string;
+  allDay: boolean;
+}
+
+const DOW = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+/** Lee un feed iCal y devuelve los eventos de `date` (incluye recurrencias diarias/semanales simples). */
+export function eventsForDate(ics: string, date: string): CalEvent[] {
+  const lines = ics.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+  const out: CalEvent[] = [];
+  let ev: Record<string, string> | null = null;
+  const exdates: string[] = [];
+  for (const line of lines) {
+    if (line === 'BEGIN:VEVENT') { ev = {}; exdates.length = 0; continue; }
+    if (line === 'END:VEVENT' && ev) {
+      const e = parseEvent(ev, [...exdates], date);
+      if (e) out.push(e);
+      ev = null;
+      continue;
+    }
+    if (!ev) continue;
+    const i = line.indexOf(':');
+    if (i < 0) continue;
+    const key = line.slice(0, i);
+    const val = line.slice(i + 1);
+    const name = key.split(';')[0];
+    if (name === 'EXDATE') exdates.push(...val.split(','));
+    else ev[name] = name === 'DTSTART' || name === 'DTEND' ? key + ':' + val : val;
+  }
+  return out.sort((a, b) => a.start.localeCompare(b.start));
+}
+
+function parseDT(raw: string): { date: string; time: string; allDay: boolean } {
+  const val = raw.slice(raw.lastIndexOf(':') + 1);
+  const allDay = /VALUE=DATE(?!-)/.test(raw) || /^\d{8}$/.test(val);
+  const y = +val.slice(0, 4), m = +val.slice(4, 6), d = +val.slice(6, 8);
+  if (allDay) return { date: `${y}-${pad(m)}-${pad(d)}`, time: '', allDay };
+  const hh = +val.slice(9, 11), mi = +val.slice(11, 13);
+  const dt = val.endsWith('Z') ? new Date(Date.UTC(y, m - 1, d, hh, mi)) : new Date(y, m - 1, d, hh, mi);
+  return { date: `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`, time: `${pad(dt.getHours())}:${pad(dt.getMinutes())}`, allDay };
+}
+
+function parseEvent(ev: Record<string, string>, exdates: string[], date: string): CalEvent | null {
+  if (!ev.DTSTART || ev.STATUS === 'CANCELLED') return null;
+  const st = parseDT(ev.DTSTART);
+  const en = ev.DTEND ? parseDT(ev.DTEND) : st;
+  const title = (ev.SUMMARY ?? 'Evento').replace(/\\,/g, ',').replace(/\\n/g, ' ');
+  const res = { title, start: st.time, end: en.time, allDay: st.allDay };
+  if (exdates.some((x) => x.startsWith(date.replace(/-/g, '')))) return null;
+  if (!ev.RRULE) return st.date === date || (st.allDay && st.date <= date && en.date > date) ? res : null;
+  if (date < st.date) return null;
+  const r = Object.fromEntries(ev.RRULE.split(';').map((kv) => kv.split('=')));
+  if (r.UNTIL && date.replace(/-/g, '') > r.UNTIL.slice(0, 8)) return null;
+  const interval = Number(r.INTERVAL ?? 1);
+  const diff = daysBetween(st.date, date);
+  if (r.FREQ === 'DAILY') return diff % interval === 0 ? res : null;
+  if (r.FREQ === 'WEEKLY') {
+    const days = r.BYDAY ? r.BYDAY.split(',') : [DOW[fromISO(st.date).getDay()]];
+    const weeks = Math.floor(daysBetween(weekStart(st.date), weekStart(date)) / 7);
+    return days.includes(DOW[fromISO(date).getDay()]) && weeks % interval === 0 ? res : null;
+  }
+  if (r.FREQ === 'MONTHLY' && !r.BYDAY) return date.slice(8) === st.date.slice(8) ? res : null;
+  if (r.FREQ === 'YEARLY') return date.slice(5) === st.date.slice(5) ? res : null;
+  return null;
 }

@@ -2,39 +2,54 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from '../lib/store';
 import { addDays, daysBetween, pretty, range, today, weekStart } from '../lib/dates';
 import {
-  AREA, EXCUSE_FIX, EXCUSE_LABEL, EXPERIMENT_TEMPLATE, PROFILE_ID, QUADRANT_LABEL,
-  cajaStreak, defaultResults, generatePlan, planId, quadrant, simpleCoach, weekId, weeklyNeeded,
-  type Area, type DayPlan, type Excuse, type Energy, type Note, type PlanItem, type Profile, type Quadrant, type WeekRec,
+  AREA, AREA_RANK, EMPTY_LOG, EXCUSE_FIX, EXCUSE_LABEL, EXPERIMENT_TEMPLATE, PROFILE_ID, QUADRANT_LABEL,
+  cajaStreak, dayName, defaultResults, eventsForDate, gcalLink, generatePlan, guessArea, logCoach, planId, replan,
+  simpleCoach, splitTasks, suggestQuadrant, weekId, weeklyNeeded, withDefaults,
+  type Area, type CalEvent, type ChangeReason, type DayLog, type DayPlan, type Excuse, type Energy, type FixedTask,
+  type Note, type PlanItem, type Profile, type Quadrant, type WeekRec,
 } from '../lib/simple';
 import { NumInput, toast } from '../ui';
 import { Wizard } from './Wizard';
 import { SettingsScreen } from '../screens/Settings';
 
-type Tab = 'hoy' | 'semana' | 'mente' | 'ajustes';
+type Tab = 'hoy' | 'semana' | 'ordenar' | 'ajustes';
+type Intent = 'ahora' | 'registrar' | null;
+
+/** Atajos del ícono (manifest): ?go=ahora | registrar | ordenar */
+function readIntent(): { tab: Tab; intent: Intent } {
+  const go = new URLSearchParams(location.search).get('go');
+  if (go) history.replaceState(null, '', location.pathname);
+  if (go === 'ordenar') return { tab: 'ordenar', intent: null };
+  if (go === 'ahora' || go === 'registrar') return { tab: 'hoy', intent: go };
+  return { tab: 'hoy', intent: null };
+}
 
 export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
   const s = useStore();
-  const profile = s.get('sprofile', PROFILE_ID);
-  const [tab, setTab] = useState<Tab>('hoy');
+  const stored = s.get('sprofile', PROFILE_ID);
+  const [{ tab, intent }, setNav] = useState(readIntent);
   const [wizard, setWizard] = useState(false);
+  const setTab = (t: Tab) => setNav({ tab: t, intent: null });
 
-  if (!profile || wizard) {
+  if (!stored || wizard) {
     return (
       <div className="s-app">
         <Wizard onDone={() => { setWizard(false); setTab('hoy'); }} />
       </div>
     );
   }
+  const profile = withDefaults(stored);
 
   return (
     <div className="s-app">
       <main className="s-main">
-        {tab === 'hoy' && <Today p={profile} />}
+        {tab === 'hoy' && <Today p={profile} intent={intent} goWeek={() => setTab('semana')} />}
         {tab === 'semana' && <Week p={profile} />}
-        {tab === 'mente' && <Mind />}
+        {tab === 'ordenar' && <Organize />}
         {tab === 'ajustes' && (
           <div>
             <h1 className="s-h1">Ajustes</h1>
+            <CalendarSettings p={profile} />
             <div className="s-card">
               <button className="s-btn tonal block" onClick={() => setWizard(true)}>Rehacer el test</button>
               <button className="s-btn text block" onClick={onAdvanced}>Pasar a modo avanzado</button>
@@ -45,7 +60,7 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
         )}
       </main>
       <nav className="s-nav">
-        {([['hoy', 'Hoy', '☀'], ['semana', 'Semana', '▦'], ['mente', 'Mente', '✎'], ['ajustes', 'Ajustes', '⚙']] as [Tab, string, string][]).map(([id, l, i]) => (
+        {([['hoy', 'Hoy', '☀'], ['semana', 'Semana', '▦'], ['ordenar', 'Ordenar', '⊞'], ['ajustes', 'Ajustes', '⚙']] as [Tab, string, string][]).map(([id, l, i]) => (
           <button key={id} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); window.scrollTo(0, 0); }}>
             <span className="s-nav-ic">{i}</span>
             {l}
@@ -70,27 +85,54 @@ function setItems(s: ReturnType<typeof useStore>, plan: DayPlan, items: PlanItem
 }
 
 const fmtMin = (m: number) => (m <= 0 ? '' : m >= 60 ? `${Math.round((m / 60) * 10) / 10} h`.replace('.', ',') : `${m} min`);
+const byTime = (a: PlanItem, b: PlanItem) => (a.time ?? '99').localeCompare(b.time ?? '99');
 
-function Today({ p }: { p: Profile }) {
+function useCalendar(url: string | undefined, date: string) {
+  const [state, setState] = useState<{ events: CalEvent[]; error: string | null; loading: boolean }>({ events: [], error: null, loading: false });
+  useEffect(() => {
+    if (!url) return;
+    let alive = true;
+    setState((x) => ({ ...x, loading: true }));
+    fetch('/api/ical?url=' + encodeURIComponent(url))
+      .then(async (r) => {
+        const text = await r.text();
+        if (!r.ok) throw new Error(text || 'Error ' + r.status);
+        if (!text.startsWith('BEGIN:VCALENDAR')) throw new Error('la respuesta no es un calendario');
+        return text;
+      })
+      .then((ics) => alive && setState({ events: eventsForDate(ics, date), error: null, loading: false }))
+      .catch((e: Error) => alive && setState({ events: [], error: e.message.slice(0, 120), loading: false }));
+    return () => {
+      alive = false;
+    };
+  }, [url, date]);
+  return state;
+}
+
+function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () => void }) {
   const s = useStore();
   const d = today();
   const plan = useDayPlan(p, d);
   const plans = s.all('splan');
   const weeks = s.all('sweek');
-  const insights = simpleCoach(p, plans, weeks, d);
+  const insights = [...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
   const streak = cajaStreak(plans, d);
   const week = s.get('sweek', weekId(weekStart(d)));
-  const [focus, setFocus] = useState(false);
+  const cal = useCalendar(p.icalUrl, d);
+  const [focus, setFocus] = useState(intent === 'ahora');
   const [edit, setEdit] = useState<PlanItem | 'new' | null>(null);
-  const [close, setClose] = useState(false);
+  const [close, setClose] = useState(intent === 'registrar');
+  const [change, setChange] = useState(false);
   const [open, setOpen] = useState(false);
   if (!plan) return null;
 
   const low = plan.energy === 'bajo';
   const caja = plan.items.filter((i) => i.area === 'caja');
-  const sec = plan.items.filter((i) => i.area !== 'caja');
+  const sec = plan.items.filter((i) => i.area !== 'caja' && i.area !== 'fijo');
+  const fixed = plan.items.filter((i) => i.area === 'fijo').sort(byTime);
   const done = plan.items.filter((i) => i.done).length;
   const hour = new Date().getHours();
+  const sunday = new Date().getDay() === 0;
   const toggle = (it: PlanItem) => setItems(s, plan, plan.items.map((x) => (x.id === it.id ? { ...x, done: !x.done } : x)));
   const top = insights[0];
 
@@ -100,6 +142,7 @@ function Today({ p }: { p: Profile }) {
       <div className="s-item-body" onClick={() => setEdit(it)}>
         <div className="s-item-title">{low ? it.min : it.title}</div>
         <div className="s-item-meta">
+          {it.time && <b>{it.time}</b>}
           <span className={'s-chip ' + AREA[it.area].color}>{AREA[it.area].label}</span>
           {!low && fmtMin(it.minutes) && <span>{fmtMin(it.minutes)}</span>}
           {low && <span>versión mínima</span>}
@@ -121,6 +164,13 @@ function Today({ p }: { p: Profile }) {
         </div>
       </header>
 
+      {sunday && (
+        <div className="s-card s-tonal" onClick={goWeek}>
+          <b>Domingo: planificá la semana</b>
+          <p className="small">Revisá la plata, elegí 3 resultados y el evento social de la semana. 10 minutos. →</p>
+        </div>
+      )}
+
       {!plan.energy && (
         <div className="s-card s-tonal">
           <b>¿Cómo arrancás hoy?</b>
@@ -139,8 +189,9 @@ function Today({ p }: { p: Profile }) {
           <p className="s-muted small">{top.evidence}</p>
           {p.tone !== 'datos' && (open ? (
             <>
-              <p className="small"><b>Para que te sea más fácil cumplir:</b></p>
+              <p className="small"><b>Para que te sea más fácil:</b></p>
               <ol className="s-fixes">{top.fixes.map((f) => <li key={f}>{f}</li>)}</ol>
+              {insights.length > 1 && <p className="s-muted small">+{insights.length - 1} alertas más en Semana.</p>}
             </>
           ) : <p className="s-link small">Ver cómo facilitarlo →</p>)}
         </div>
@@ -148,31 +199,51 @@ function Today({ p }: { p: Profile }) {
 
       <button className="s-btn filled big block" onClick={() => setFocus(true)}>¿Qué hago ahora?</button>
 
+      {p.icalUrl && (cal.events.length > 0 || cal.error) && (
+        <section className="s-card s-outline">
+          <div className="s-sec-head"><h2>Agenda</h2><small className="s-muted">Google Calendar</small></div>
+          {cal.error && <p className="s-muted small">No pude leer el calendario: {cal.error}</p>}
+          {cal.events.map((e, i) => (
+            <div key={i} className="s-event"><b>{e.allDay ? 'Todo el día' : `${e.start}–${e.end}`}</b><span>{e.title}</span></div>
+          ))}
+        </section>
+      )}
+
       <section className="s-card">
         <div className="s-sec-head"><h2>Primero: caja</h2><small className="s-muted">lo que genera plata</small></div>
-        {caja.map(Row)}
+        {caja.sort(byTime).map(Row)}
       </section>
       <section className="s-card">
         <div className="s-sec-head"><h2>Después</h2><small className="s-muted">{done}/{plan.items.length} hechas</small></div>
         {sec.length === 0 && <p className="s-muted small">Hoy no hay secundarias. Enfocate en la caja.</p>}
-        {sec.map(Row)}
+        {sec.sort(byTime).map(Row)}
         <button className="s-btn text" onClick={() => setEdit('new')}>+ Agregar</button>
       </section>
-
-      {week && week.results.length > 0 && (
-        <section className="s-card s-outline">
-          <small className="s-muted">Esta semana</small>
-          {week.results.map((r, i) => <div key={i} className={'small' + (r.done ? ' s-strike' : '')}>• {r.text}</div>)}
+      {fixed.length > 0 && (
+        <section className="s-card">
+          <div className="s-sec-head"><h2>Tareas fijas de hoy</h2><small className="s-muted">día y hora fijos</small></div>
+          {fixed.map(Row)}
         </section>
       )}
 
-      <button className={'s-btn ' + (hour >= 18 ? 'tonal' : 'text') + ' block'} onClick={() => setClose(true)}>
-        {plan.closed ? 'Día cerrado · editar' : 'Cerrar el día (1 min)'}
-      </button>
+      {week && week.results.some((r) => r.text) && (
+        <section className="s-card s-outline">
+          <small className="s-muted">Esta semana</small>
+          {week.results.filter((r) => r.text).map((r, i) => <div key={i} className={'small' + (r.done ? ' s-strike' : '')}>• {r.text}</div>)}
+        </section>
+      )}
+
+      <div className="s-row2">
+        <button className="s-btn tonal" onClick={() => setChange(true)}>Cambió el día</button>
+        <button className={'s-btn ' + (hour >= 18 ? 'filled' : 'tonal')} onClick={() => setClose(true)}>
+          {plan.closed ? 'Editar cierre' : 'Cerrar el día'}
+        </button>
+      </div>
 
       {focus && <Focus plan={plan} onClose={() => setFocus(false)} />}
       {edit && <ItemSheet plan={plan} item={edit === 'new' ? undefined : edit} onClose={() => setEdit(null)} />}
       {close && <CloseSheet plan={plan} p={p} onClose={() => setClose(false)} />}
+      {change && <ChangeSheet plan={plan} onClose={() => setChange(false)} />}
     </div>
   );
 }
@@ -189,11 +260,28 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
+function ChangeSheet({ plan, onClose }: { plan: DayPlan; onClose: () => void }) {
+  const s = useStore();
+  const apply = (r: ChangeReason) => {
+    s.update('splan', plan.id, { items: replan(plan.items, r, plan.date), changed: r });
+    toast('Plan reacomodado.');
+    onClose();
+  };
+  return (
+    <Sheet title="¿Qué cambió?" onClose={onClose}>
+      <p className="s-muted small">El plan se adapta. Lo que no se negocia: al menos una acción de caja.</p>
+      <button className="s-option" onClick={() => apply('lluvia')}><b>Llueve / no se puede trabajar afuera</b><br /><small>Las horas del Roble pasan a clientes, presupuestos y avisos.</small></button>
+      <button className="s-option" onClick={() => apply('mas_trabajo')}><b>Salió más trabajo</b><br /><small>Quedan la caja mínima y las fijas cortas. Lo demás, otro día.</small></button>
+      <button className="s-option" onClick={() => apply('imprevisto')}><b>Imprevisto</b><br /><small>3 cosas, en versión mínima.</small></button>
+    </Sheet>
+  );
+}
+
 /** Modo foco: elige la próxima acción y la reduce a 2 minutos para empezar. */
 function Focus({ plan, onClose }: { plan: DayPlan; onClose: () => void }) {
   const s = useStore();
   const pending = plan.items.filter((i) => !i.done && !/^Jornada/.test(i.title));
-  const it = pending.find((i) => i.area === 'caja') ?? pending[0];
+  const it = pending.find((i) => i.area === 'caja') ?? pending.sort((a, b) => AREA_RANK[a.area] - AREA_RANK[b.area])[0];
   const [start] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
   const [why, setWhy] = useState(false);
@@ -223,7 +311,7 @@ function Focus({ plan, onClose }: { plan: DayPlan; onClose: () => void }) {
         <>
           <div className="s-callout">
             <b>Empezá con 2 minutos:</b> {it.min}.<br />
-            Después decidís si seguís.
+            Celular en otra habitación. Después decidís si seguís.
           </div>
           <div className="s-timer">{String(Math.floor(secs / 60)).padStart(2, '0')}:{String(secs % 60).padStart(2, '0')}</div>
           <button className="s-btn filled block" onClick={mark}>Listo ✓</button>
@@ -255,29 +343,42 @@ function ItemSheet({ plan, item, onClose }: { plan: DayPlan; item?: PlanItem; on
   const [title, setTitle] = useState(item?.title ?? '');
   const [min, setMin] = useState(item?.min ?? '');
   const [minutes, setMinutes] = useState<number | null>(item?.minutes ?? 30);
+  const [time, setTime] = useState(item?.time ?? '');
   const [area, setArea] = useState<Area>(item?.area ?? 'extra');
-  const tooMany = !item && plan.items.length >= 6;
+  const tooMany = !item && plan.items.length >= 7;
+  const build = (): PlanItem => ({ id: item?.id ?? `${plan.date}-${Date.now().toString(36)}`, area, title: title.trim(), min: min.trim() || 'Empezar 2 minutos', minutes: minutes ?? 0, done: item?.done ?? false, time: time || undefined });
   const save = () => {
     if (!title.trim()) return;
-    const it: PlanItem = { id: item?.id ?? `${plan.date}-${Date.now().toString(36)}`, area, title: title.trim(), min: min.trim() || 'Empezar 2 minutos', minutes: minutes ?? 0, done: item?.done ?? false };
+    const it = build();
     setItems(s, plan, item ? plan.items.map((x) => (x.id === item.id ? it : x)) : [...plan.items, it]);
     onClose();
   };
   return (
     <Sheet title={item ? 'Editar' : 'Agregar al día'} onClose={onClose}>
-      {tooMany && <p className="s-callout">Ya tenés {plan.items.length} cosas hoy. Eisenhower: si no es importante <i>y</i> urgente, mandalo a Mente y agendalo.</p>}
+      {tooMany && <p className="s-callout">Ya tenés {plan.items.length} cosas hoy. Si no es importante <i>y</i> urgente, mandalo a Ordenar y agendalo.</p>}
       <label className="s-label">Qué</label>
-      <input className="s-input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Verbo + qué + cuánto" />
+      <input className="s-input" autoFocus={!item} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Verbo + qué + cuánto" />
+      <div className="s-grid2">
+        <div>
+          <label className="s-label">Hora</label>
+          <input className="s-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+        </div>
+        <div>
+          <label className="s-label">Minutos</label>
+          <NumInput integer value={minutes} onChange={setMinutes} />
+        </div>
+      </div>
       <label className="s-label">Versión mínima (2 minutos)</label>
       <input className="s-input" value={min} onChange={(e) => setMin(e.target.value)} placeholder="Ej.: 1 mensaje" />
-      <label className="s-label">Minutos</label>
-      <NumInput integer value={minutes} onChange={setMinutes} />
       <label className="s-label">Área</label>
       <div className="s-pills">
         {(Object.keys(AREA) as Area[]).map((a) => (
           <button key={a} className={'s-pill' + (a === area ? ' on' : '')} onClick={() => setArea(a)}>{AREA[a].label}</button>
         ))}
       </div>
+      {title.trim() && time && (
+        <a className="s-btn tonal block s-center-text" href={gcalLink(title.trim(), plan.date, time, minutes || 30)} target="_blank" rel="noreferrer">Agregar a Google Calendar</a>
+      )}
       <div className="s-row-end">
         {item && <button className="s-btn text danger" onClick={() => { setItems(s, plan, plan.items.filter((x) => x.id !== item.id)); onClose(); }}>Quitar</button>}
         <button className="s-btn filled" onClick={save}>Guardar</button>
@@ -286,23 +387,38 @@ function ItemSheet({ plan, item, onClose }: { plan: DayPlan; item?: PlanItem; on
   );
 }
 
+function Stepper({ label, value, step, onChange, unit }: { label: string; value: number; step: number; onChange: (n: number) => void; unit?: string }) {
+  return (
+    <div className="s-stepper">
+      <span>{label}</span>
+      <div>
+        <button onClick={() => onChange(Math.max(0, +(value - step).toFixed(1)))} aria-label={'Menos ' + label}>−</button>
+        <b>{String(value).replace('.', ',')}{unit}</b>
+        <button onClick={() => onChange(+(value + step).toFixed(1))} aria-label={'Más ' + label}>+</button>
+      </div>
+    </div>
+  );
+}
+
 function CloseSheet({ plan, p, onClose }: { plan: DayPlan; p: Profile; onClose: () => void }) {
   const s = useStore();
   const [items, setLocal] = useState(plan.items);
   const [excuse, setExcuse] = useState<Excuse | undefined>(plan.excuse);
+  const [log, setLog] = useState<DayLog>(plan.log ?? EMPTY_LOG);
   const missed = items.filter((i) => !i.done).length;
+  const up = (x: Partial<DayLog>) => setLog((l) => ({ ...l, ...x }));
   const save = () => {
-    s.update('splan', plan.id, { items, excuse: missed ? excuse : undefined, closed: true });
+    s.update('splan', plan.id, { items, excuse: missed ? excuse : undefined, closed: true, log });
     // El plan de mañana se arma solo; lo no hecho de caja pasa primero.
     const tmr = addDays(plan.date, 1);
     if (!s.get('splan', planId(tmr))) {
       const carry = items.filter((i) => !i.done && i.area === 'caja' && !/^Jornada/.test(i.title)).slice(0, 1).map((i) => ({ ...i, id: i.id + '-c', title: i.title.replace(/^(\(pendiente\) )?/, '(pendiente) ') }));
-      const gen = generatePlan(p, tmr);
-      s.create('splan', { id: planId(tmr), kind: 'splan', date: tmr, items: [...carry, ...gen].slice(0, 6), closed: false });
+      s.create('splan', { id: planId(tmr), kind: 'splan', date: tmr, items: [...carry, ...generatePlan(p, tmr)], closed: false });
     }
     toast(missed === 0 ? 'Día completo. Así se construye.' : 'Día cerrado. Mañana empezás por la caja.');
     onClose();
   };
+  const limit = p.phoneLimit ?? 1;
   return (
     <Sheet title="¿Cómo te fue?" onClose={onClose}>
       {items.map((it) => (
@@ -322,6 +438,16 @@ function CloseSheet({ plan, p, onClose }: { plan: DayPlan; p: Profile; onClose: 
           {excuse && <p className="s-callout small">{EXCUSE_FIX[excuse][0]}</p>}
         </>
       )}
+      <label className="s-label">Registro del día</label>
+      <div className="s-card s-outline s-log">
+        <Stepper label="Mensajes a clientes" value={log.messages} step={1} onChange={(n) => up({ messages: n })} />
+        <Stepper label="Horas de trabajo enfocado" value={log.focusH} step={0.5} unit=" h" onChange={(n) => up({ focusH: n })} />
+        <div className="s-stepper"><span>Evento o actividad social</span><button className={'s-pill' + (log.social ? ' on' : '')} onClick={() => up({ social: !log.social })}>{log.social ? '✓ Fui' : 'No'}</button></div>
+        <Stepper label="Celular de ocio" value={log.phoneH} step={0.5} unit=" h" onChange={(n) => up({ phoneH: n })} />
+        {log.phoneH > limit && <p className="s-warn small">Pasaste tu límite ({limit} h). Mirá el tiempo real en Bienestar digital de Android.</p>}
+        <div className="s-stepper"><span>Gym / deporte</span><button className={'s-pill' + (log.gym ? ' on' : '')} onClick={() => up({ gym: !log.gym })}>{log.gym ? '✓ Fui' : 'No'}</button></div>
+        <Stepper label="Horas de sueño" value={log.sleepH} step={0.5} unit=" h" onChange={(n) => up({ sleepH: n })} />
+      </div>
       <button className="s-btn filled block" onClick={save}>Cerrar el día</button>
     </Sheet>
   );
@@ -336,6 +462,8 @@ function useWeek(p: Profile, ws: string): WeekRec | undefined {
   return w;
 }
 
+const fmtN = (n: number) => String(Math.round(n * 10) / 10).replace('.', ',');
+
 function Week({ p }: { p: Profile }) {
   const s = useStore();
   const d = today();
@@ -344,7 +472,8 @@ function Week({ p }: { p: Profile }) {
   const weeks = s.all('sweek');
   const plans = s.all('splan');
   const need = weeklyNeeded(p);
-  const insights = simpleCoach(p, plans, weeks, d);
+  const target = Math.round((p.incomeTarget ?? 4_000_000) / 4.33);
+  const insights = [...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
   const [change, setChange] = useState(w?.change ?? '');
   if (!w) return null;
 
@@ -359,6 +488,8 @@ function Week({ p }: { p: Profile }) {
     const pl = plans.find((y) => y.date === x);
     return { x, ok: !!pl?.items.some((i) => i.area === 'caja' && i.done), any: !!pl };
   });
+  const logs = plans.filter((x) => x.date >= ws && x.log).map((x) => x.log!);
+  const sum = (f: (l: DayLog) => number) => logs.reduce((a, l) => a + f(l), 0);
   const exp = p.experiment;
   const expLeft = exp ? daysBetween(d, exp.end) : 0;
 
@@ -379,7 +510,7 @@ function Week({ p }: { p: Profile }) {
     <div>
       <h1 className="s-h1">Semana</h1>
       <section className="s-card">
-        <div className="s-sec-head"><h2>Plata de la semana</h2><small className="s-muted">meta $ {need.toLocaleString('es-AR')}</small></div>
+        <div className="s-sec-head"><h2>Plata de la semana</h2><small className="s-muted">mín. $ {need.toLocaleString('es-AR')} · meta $ {target.toLocaleString('es-AR')}</small></div>
         <NumInput value={w.income} onChange={(n) => s.update('sweek', w.id, { income: n })} placeholder="¿Cuánto entró esta semana?" />
         <div className="s-bars">
           {last4.map((x) => (
@@ -388,15 +519,38 @@ function Week({ p }: { p: Profile }) {
               <small>{x.k === ws ? 'esta' : x.k.slice(8) + '/' + x.k.slice(5, 7)}</small>
             </div>
           ))}
-          <div className="s-needline" style={{ bottom: `${(need / (max || 1)) * 64 + 18}px` }} />
         </div>
         {avg != null && (
           <p className="small">
             Promedio: <b>$ {Math.round(avg).toLocaleString('es-AR')}</b>/sem ≈ $ {Math.round(avg * 4.33).toLocaleString('es-AR')}/mes.{' '}
-            {avg < need ? `Faltan $ ${Math.round(need - avg).toLocaleString('es-AR')} por semana.` : 'Estás sobre tu mínimo.'}
+            {avg < need ? `Faltan $ ${Math.round(need - avg).toLocaleString('es-AR')} por semana para el mínimo.` : avg < target ? 'Sobre el mínimo; vamos por la meta.' : 'Estás sobre tu meta.'}
           </p>
         )}
       </section>
+
+      <section className="s-card">
+        <div className="s-sec-head"><h2>Registro de la semana</h2><small className="s-muted">{logs.length} días cargados</small></div>
+        <div className="s-kpis">
+          <div><b>{sum((l) => l.messages)}</b><small>mensajes a clientes</small></div>
+          <div><b>{fmtN(sum((l) => l.focusH))} h</b><small>trabajo enfocado</small></div>
+          <div className={logs.some((l) => l.social) ? 'ok' : ''}><b>{logs.filter((l) => l.social).length}/1</b><small>eventos sociales</small></div>
+          <div className={logs.length && sum((l) => l.phoneH) / logs.length > (p.phoneLimit ?? 1) ? 'bad' : ''}><b>{logs.length ? fmtN(sum((l) => l.phoneH) / logs.length) : '–'} h</b><small>celular/día (lím. {p.phoneLimit ?? 1})</small></div>
+          <div><b>{logs.filter((l) => l.gym).length}</b><small>gym/deporte</small></div>
+          <div><b>{logs.length ? fmtN(sum((l) => l.sleepH) / logs.length) : '–'} h</b><small>sueño/día</small></div>
+        </div>
+      </section>
+
+      {insights.length > 0 && (
+        <section className="s-card">
+          <div className="s-sec-head"><h2>Coach</h2></div>
+          {insights.map((i) => (
+            <details key={i.id} className={'s-insight lvl' + i.level}>
+              <summary><b>{i.title}</b><br /><small className="s-muted">{i.evidence}</small></summary>
+              <ol className="s-fixes">{i.fixes.map((f) => <li key={f}>{f}</li>)}</ol>
+            </details>
+          ))}
+        </section>
+      )}
 
       <section className="s-card">
         <div className="s-sec-head"><h2>3 resultados de la semana</h2></div>
@@ -408,6 +562,8 @@ function Week({ p }: { p: Profile }) {
         ))}
         {w.results.length < 3 && <button className="s-btn text" onClick={() => s.update('sweek', w.id, { results: [...w.results, { text: '', done: false }] })}>+ Resultado</button>}
       </section>
+
+      <FixedEditor p={p} />
 
       <section className="s-card">
         <div className="s-sec-head"><h2>Experimento de ingreso extra</h2><small className="s-muted">uno a la vez</small></div>
@@ -450,12 +606,12 @@ function Week({ p }: { p: Profile }) {
         <div className="s-grid">
           {grid.map((g) => <span key={g.x} title={g.x} className={'s-cell' + (g.ok ? ' ok' : g.any ? ' miss' : '')} />)}
         </div>
-        <p className="s-muted small">Cada cuadrado verde es un día en que hiciste algo por la plata. No hace falta que sea perfecto: hace falta que no se corte dos días seguidos.</p>
+        <p className="s-muted small">Cada cuadrado verde es un día en que hiciste algo por la plata. Que no se corte dos días seguidos.</p>
       </section>
 
       <section className="s-card">
         <div className="s-sec-head"><h2>Un cambio para la semana que viene</h2></div>
-        {insights.slice(0, 2).flatMap((i) => i.fixes.slice(0, 1)).map((f) => (
+        {insights.slice(0, 3).map((i) => i.fixes[0]).map((f) => (
           <button key={f} className={'s-option' + (change === f ? ' on' : '')} onClick={() => { setChange(f); s.update('sweek', w.id, { change: f }); }}>{f}</button>
         ))}
         <input className="s-input" value={change} onChange={(e) => setChange(e.target.value)} onBlur={() => s.update('sweek', w.id, { change })} placeholder="O escribí el tuyo" />
@@ -464,93 +620,169 @@ function Week({ p }: { p: Profile }) {
   );
 }
 
-function Mind() {
+const WEEK: [number, string][] = [[1, 'Lu'], [2, 'Ma'], [3, 'Mi'], [4, 'Ju'], [5, 'Vi'], [6, 'Sá'], [0, 'Do']];
+
+/** Tareas recurrentes con día y horario. Se pueden mandar al calendario como evento semanal. */
+export function FixedEditor({ p, compact }: { p: Profile; compact?: boolean }) {
+  const s = useStore();
+  const list = p.fixed ?? [];
+  const [title, setTitle] = useState('');
+  const save = (fixed: FixedTask[]) => s.update('sprofile', PROFILE_ID, { fixed });
+  const upd = (id: string, x: Partial<FixedTask>) => save(list.map((f) => (f.id === id ? { ...f, ...x } : f)));
+  const sorted = [...list].sort((a, b) => ((a.day + 6) % 7) - ((b.day + 6) % 7) || a.time.localeCompare(b.time));
+  const nextDate = (day: number) => {
+    const t = today();
+    const diff = (day - new Date().getDay() + 7) % 7;
+    return addDays(t, diff);
+  };
+  return (
+    <section className={compact ? '' : 's-card'}>
+      {!compact && <div className="s-sec-head"><h2>Tareas fijas</h2><small className="s-muted">día y hora</small></div>}
+      {sorted.map((f) => (
+        <div key={f.id} className="s-fixed">
+          <div className="s-fixed-top">
+            <input className="s-input flat" value={f.title} onChange={(e) => upd(f.id, { title: e.target.value })} />
+            <button className="s-btn text small danger" onClick={() => save(list.filter((x) => x.id !== f.id))} aria-label="Quitar">✕</button>
+          </div>
+          <div className="s-fixed-row">
+            <select className="s-input s-sel" value={f.day} onChange={(e) => upd(f.id, { day: Number(e.target.value) })}>
+              {WEEK.map(([v]) => <option key={v} value={v}>{dayName(v)}</option>)}
+            </select>
+            <input className="s-input s-sel" type="time" value={f.time} onChange={(e) => upd(f.id, { time: e.target.value })} />
+            {!compact && (
+              <a className="s-btn text small" target="_blank" rel="noreferrer" href={gcalLink(f.title, nextDate(f.day), f.time, f.minutes) + '&recur=' + encodeURIComponent('RRULE:FREQ=WEEKLY')}>+ Calendar</a>
+            )}
+          </div>
+        </div>
+      ))}
+      <div className="s-search">
+        <input className="s-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Nueva tarea fija (ej.: pagar cuentas)" />
+        <button className="s-btn tonal" onClick={() => {
+          if (!title.trim()) return;
+          save([...list, { id: 'fx-' + Date.now().toString(36), title: title.trim(), day: 6, time: '10:00', minutes: 30 }]);
+          setTitle('');
+        }}>Agregar</button>
+      </div>
+      {!compact && <p className="s-muted small">Los cambios se aplican a los días que todavía no abriste. "+ Calendar" crea el evento semanal en Google Calendar.</p>}
+    </section>
+  );
+}
+
+/** Asistente para ordenar: pegás tareas, se sugieren área y cuadrante, vos corregís con un toque. */
+function Organize() {
   const s = useStore();
   const notes = s.all('snote').filter((n) => n.status === 'open');
   const [text, setText] = useState('');
-  const [current, setCurrent] = useState<Note | null>(null);
-  const [imp, setImp] = useState<boolean | null>(null);
+  const [sel, setSel] = useState<Note | null>(null);
 
   const add = () => {
-    if (!text.trim()) return;
-    const n = s.create('snote', { kind: 'snote', text: text.trim(), status: 'open' });
+    const tasks = splitTasks(text);
+    if (!tasks.length) return;
+    for (const t of tasks) {
+      const area = guessArea(t);
+      s.create('snote', { kind: 'snote', text: t, area, quadrant: suggestQuadrant(t, area), status: 'open' });
+    }
     setText('');
-    setCurrent(n);
-    setImp(null);
+    toast(`${tasks.length} ${tasks.length === 1 ? 'tarea ordenada' : 'tareas ordenadas'}. Tocá una para corregirla.`);
   };
 
-  const classify = (n: Note, q: Quadrant) => {
-    if (q === 'hacer') {
-      const d = today();
-      const plan = s.get('splan', planId(d));
-      if (plan) {
-        setItems(s, plan, [...plan.items, { id: n.id + '-t', area: 'extra', title: n.text, min: 'Empezar 2 minutos', minutes: 30, done: false }]);
-        s.update('snote', n.id, { quadrant: q, status: 'done' });
-        toast('Agregado a Hoy');
-      } else s.update('snote', n.id, { quadrant: q });
-    } else if (q === 'eliminar') {
-      s.update('snote', n.id, { quadrant: q, status: 'archived' });
-      toast('Soltado. Una cosa menos en la cabeza.');
-    } else s.update('snote', n.id, { quadrant: q });
-    setCurrent(null);
+  const toToday = (n: Note) => {
+    const d = today();
+    const plan = s.get('splan', planId(d));
+    if (!plan) return toast('Abrí Hoy primero para crear el plan del día.');
+    setItems(s, plan, [...plan.items, { id: n.id + '-t', area: n.area ?? 'extra', title: n.text, min: 'Empezar 2 minutos', minutes: 30, done: false }]);
+    s.update('snote', n.id, { status: 'done' });
+    toast('Agregada a Hoy');
+    setSel(null);
   };
 
-  const groups: Quadrant[] = ['agendar', 'delegar', 'idea'];
+  const Q: Quadrant[] = ['hacer', 'agendar', 'delegar', 'eliminar'];
+  const sortQ = (a: Note, b: Note) => AREA_RANK[a.area ?? 'extra'] - AREA_RANK[b.area ?? 'extra'];
+  const hacer = notes.filter((n) => n.quadrant === 'hacer').length;
+
   return (
     <div>
-      <h1 className="s-h1">Vaciar la cabeza</h1>
-      <p className="s-muted">Escribí lo que te da vueltas. Dos preguntas y queda en su lugar.</p>
-      <div className="s-search">
-        <input className="s-input" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="¿Qué tenés en la cabeza?" />
-        <button className="s-btn filled" onClick={add}>Anotar</button>
-      </div>
+      <h1 className="s-h1">Ordenar</h1>
+      <p className="s-muted">Escribí o pegá todo lo que tenés en la cabeza, una cosa por línea. También podés dictar con el micrófono del teclado.</p>
+      <textarea className="s-input s-dump" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={'Mandar presupuesto a Laura\nLavar el auto\nCumple de Martín el viernes\nIdea: app para jardineros'} />
+      <button className="s-btn filled block" onClick={add} disabled={!text.trim()}>Ordenar</button>
 
-      {notes.filter((n) => !n.quadrant).map((n) => (
-        <section key={n.id} className="s-card s-tonal">
-          <b>{n.text}</b>
-          {current?.id === n.id && imp !== null ? (
-            <>
-              <p className="small">¿Tiene que hacerse en las próximas 48 h?</p>
-              <div className="s-pills">
-                <button className="s-pill" onClick={() => classify(n, quadrant(imp, true))}>Sí</button>
-                <button className="s-pill" onClick={() => classify(n, quadrant(imp, false))}>No</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="small">¿Te acerca a la plata, la salud o tu gente?</p>
-              <div className="s-pills">
-                <button className="s-pill" onClick={() => { setCurrent(n); setImp(true); }}>Sí</button>
-                <button className="s-pill" onClick={() => { setCurrent(n); setImp(false); }}>No</button>
-                <button className="s-pill" onClick={() => classify(n, 'idea')}>Es una idea</button>
-              </div>
-            </>
-          )}
-        </section>
-      ))}
+      {hacer > 3 && <p className="s-callout small">Tenés {hacer} cosas en "Hacer hoy". Eisenhower funciona si "Hacer" es corto: dejá 3 y pasá el resto a "Agendar".</p>}
 
-      {groups.map((g) => {
-        const ns = notes.filter((n) => n.quadrant === g);
-        if (!ns.length) return null;
-        return (
-          <section key={g} className="s-card">
-            <div className="s-sec-head"><h2>{QUADRANT_LABEL[g].title}</h2><small className="s-muted">{QUADRANT_LABEL[g].hint}</small></div>
-            {ns.map((n) => (
-              <div key={n.id} className="s-note">
-                <span>{n.text}</span>
-                <span className="s-note-actions">
-                  {g !== 'idea' && <button className="s-btn text small" onClick={() => classify(n, 'hacer')}>A hoy</button>}
-                  <button className="s-btn text small" onClick={() => s.update('snote', n.id, { status: 'archived' })}>✕</button>
-                </span>
-              </div>
+      <div className="s-matrix">
+        {Q.map((q) => (
+          <section key={q} className={'s-quad q-' + q}>
+            <div className="s-quad-head"><b>{QUADRANT_LABEL[q].title}</b><small>{QUADRANT_LABEL[q].hint}</small></div>
+            {notes.filter((n) => n.quadrant === q).sort(sortQ).map((n) => (
+              <button key={n.id} className="s-qitem" onClick={() => setSel(n)}>
+                <span className={'s-dot ' + AREA[n.area ?? 'extra'].color} />
+                {n.text}
+              </button>
             ))}
           </section>
-        );
-      })}
+        ))}
+      </div>
+
+      {notes.some((n) => n.quadrant === 'idea' || !n.quadrant) && (
+        <section className="s-card">
+          <div className="s-sec-head"><h2>Ideas en espera</h2><small className="s-muted">no compiten con tu plan</small></div>
+          {notes.filter((n) => n.quadrant === 'idea' || !n.quadrant).map((n) => (
+            <button key={n.id} className="s-qitem" onClick={() => setSel(n)}><span className={'s-dot ' + AREA[n.area ?? 'extra'].color} />{n.text}</button>
+          ))}
+        </section>
+      )}
       {notes.length === 0 && <p className="s-muted small s-center">Cabeza vacía. Volvé a Hoy y hacé lo que importa.</p>}
+
+      {sel && (
+        <Sheet title={sel.text} onClose={() => setSel(null)}>
+          <label className="s-label">Cuadrante</label>
+          <div className="s-pills">
+            {([...Q, 'idea'] as Quadrant[]).map((q) => (
+              <button key={q} className={'s-pill' + (sel.quadrant === q ? ' on' : '')} onClick={() => { s.update('snote', sel.id, { quadrant: q }); setSel({ ...sel, quadrant: q }); }}>{QUADRANT_LABEL[q].title}</button>
+            ))}
+          </div>
+          <label className="s-label">Área</label>
+          <div className="s-pills">
+            {(Object.keys(AREA) as Area[]).map((a) => (
+              <button key={a} className={'s-pill' + (sel.area === a ? ' on' : '')} onClick={() => { s.update('snote', sel.id, { area: a }); setSel({ ...sel, area: a }); }}>{AREA[a].label}</button>
+            ))}
+          </div>
+          <button className="s-btn filled block" onClick={() => toToday(sel)}>Pasar a Hoy</button>
+          <a className="s-btn tonal block s-center-text" target="_blank" rel="noreferrer" href={gcalLink(sel.text, addDays(today(), 1), '10:00', 30)}>Agendar en Google Calendar</a>
+          <button className="s-btn text block" onClick={() => { s.update('snote', sel.id, { status: sel.quadrant === 'eliminar' ? 'archived' : 'done' }); setSel(null); toast('Listo. Una cosa menos en la cabeza.'); }}>
+            {sel.quadrant === 'eliminar' ? 'Soltar (eliminar)' : 'Ya está hecha'}
+          </button>
+        </Sheet>
+      )}
     </div>
   );
 }
 
-export { DEFAULT_PROFILE } from './Wizard';
+function CalendarSettings({ p }: { p: Profile }) {
+  const s = useStore();
+  const [url, setUrl] = useState(p.icalUrl ?? '');
+  const [err, setErr] = useState('');
+  const save = () => {
+    const u = url.trim();
+    if (u && !/^https:\/\/calendar\.google\.com\/calendar\/ical\//.test(u)) return setErr('Tiene que empezar con https://calendar.google.com/calendar/ical/');
+    s.update('sprofile', PROFILE_ID, { icalUrl: u || undefined });
+    setErr('');
+    toast(u ? 'Calendario conectado. Tus eventos aparecen en Hoy.' : 'Calendario desconectado.');
+  };
+  return (
+    <section className="s-card">
+      <div className="s-sec-head"><h2>Google Calendar</h2><small className="s-muted">{p.icalUrl ? 'conectado' : 'no conectado'}</small></div>
+      <ol className="s-fixes small">
+        <li>En la compu, abrí Google Calendar → ⚙ Configuración.</li>
+        <li>A la izquierda, tocá tu calendario → "Integrar el calendario".</li>
+        <li>Copiá la <b>"Dirección secreta en formato iCal"</b> y pegala acá.</li>
+      </ol>
+      <input className="s-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" />
+      {err && <p className="s-warn small">{err}</p>}
+      <button className="s-btn filled block" onClick={save}>Guardar</button>
+      <p className="s-muted small">Es solo lectura: la app ve tus eventos pero no los cambia. Para agregar bloques usá "Agregar a Google Calendar" en cada tarea.</p>
+    </section>
+  );
+}
+
 export type { Profile };

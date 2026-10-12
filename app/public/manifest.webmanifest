@@ -8,6 +8,46 @@
   "theme_color": "#1f6f4a",
   "lang": "es-AR",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "¿Qué hago ahora?",
+      "short_name": "Ahora",
+      "url": "/?go=ahora",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any"
+        }
+      ]
+    },
+    {
+      "name": "Registrar el día",
+      "short_name": "Registrar",
+      "url": "/?go=registrar",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any"
+        }
+      ]
+    },
+    {
+      "name": "Ordenar tareas",
+      "short_name": "Ordenar",
+      "url": "/?go=ordenar",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any"
+        }
+      ]
+    }
   ]
 }

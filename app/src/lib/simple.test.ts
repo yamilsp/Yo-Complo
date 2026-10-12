@@ -88,3 +88,71 @@ describe('coach simple', () => {
     expect(cajaStreak(plans, MON)).toBe(3);
   });
 });
+
+import { eventsForDate, gcalLink, guessArea, replan, splitTasks, suggestQuadrant, withDefaults, logCoach } from './simple';
+
+describe('asistente', () => {
+  it('separa listas pegadas o dictadas', () => {
+    expect(splitTasks('- Llamar a Juan\n2) Pasar presupuesto; lavar ropa\n\n• gym')).toEqual(['Llamar a Juan', 'Pasar presupuesto', 'lavar ropa', 'gym']);
+  });
+  it('sugiere área priorizando plata', () => {
+    expect(guessArea('Mandar presupuesto a cliente')).toBe('caja');
+    expect(guessArea('Cumple de Martín')).toBe('social');
+    expect(guessArea('Turno médico')).toBe('salud');
+    expect(guessArea('Lavar ropa')).toBe('fijo');
+    expect(guessArea('Terminar la canción')).toBe('experimento');
+  });
+  it('cuadrante sugerido', () => {
+    expect(suggestQuadrant('Cobrar a cliente hoy', 'caja')).toBe('hacer');
+    expect(suggestQuadrant('Armar web del Roble', 'caja')).toBe('agendar');
+    expect(suggestQuadrant('Ver serie', 'extra')).toBe('eliminar');
+    expect(suggestQuadrant('Hacer un videojuego', 'experimento')).toBe('idea');
+  });
+});
+
+describe('días fijos y cambios de plan', () => {
+  const P2 = withDefaults(P);
+  it('las tareas fijas aparecen en su día con horario', () => {
+    const sat = generatePlan(P2, addDays(MON, 5));
+    const casa = sat.find((i) => i.area === 'fijo' && /Casa/.test(i.title));
+    expect(casa?.time).toBe('10:00');
+  });
+  it('lluvia: saca la jornada y pone 2 h de clientes', () => {
+    const items = generatePlan(P2, addDays(MON, 1));
+    const r = replan(items, 'lluvia', addDays(MON, 1));
+    expect(r.some((i) => /^Jornada/.test(i.title))).toBe(false);
+    expect(r.some((i) => i.minutes === 120 && i.area === 'caja')).toBe(true);
+  });
+  it('más trabajo: solo caja y fijas', () => {
+    const r = replan(generatePlan(P2, MON), 'mas_trabajo', MON);
+    expect(r.every((i) => i.area === 'caja' || i.area === 'fijo')).toBe(true);
+  });
+});
+
+describe('coach del registro', () => {
+  it('celular sobre el límite → aumentar fricción', () => {
+    const plans = [1, 2, 3].map((i) => plan(addDays(MON, -i), [{ done: true }], { log: { messages: 10, focusH: 3, social: false, phoneH: 5, gym: true, sleepH: 7 } }));
+    const f = logCoach(withDefaults(P), plans, MON);
+    expect(f.find((x) => x.id === 'phone')?.fixes.join(' ')).toMatch(/fuera de la pieza/);
+    expect(f.some((x) => x.id === 'messages')).toBe(false);
+  });
+});
+
+describe('calendario', () => {
+  it('link de Google Calendar', () => {
+    const u = gcalLink('Clientes', '2026-10-12', '09:00', 120);
+    expect(u).toContain('dates=20261012T090000%2F20261012T110000');
+  });
+  it('lee eventos simples, de día completo y semanales', () => {
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT', 'DTSTART;TZID=America/Argentina/Buenos_Aires:20261012T150000', 'DTEND;TZID=America/Argentina/Buenos_Aires:20261012T160000', 'SUMMARY:Dentista', 'END:VEVENT',
+      'BEGIN:VEVENT', 'DTSTART;VALUE=DATE:20261012', 'DTEND;VALUE=DATE:20261013', 'SUMMARY:Feriado', 'END:VEVENT',
+      'BEGIN:VEVENT', 'DTSTART:20260105T200000', 'DTEND:20260105T210000', 'RRULE:FREQ=WEEKLY;BYDAY=MO', 'SUMMARY:Club emprendedores', 'END:VEVENT',
+      'BEGIN:VEVENT', 'DTSTART:20261013T100000', 'SUMMARY:Otro día', 'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const ev = eventsForDate(ics, '2026-10-12');
+    expect(ev.map((e) => e.title)).toEqual(['Feriado', 'Dentista', 'Club emprendedores']);
+  });
+});

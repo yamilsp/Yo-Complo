@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../lib/store';
 import { addDays, today } from '../lib/dates';
 import {
-  EXCUSE_LABEL, EXPERIMENT_TEMPLATE, IDEAS, PROFILE_ID, dayName,
+  DEFAULT_FIXED, EXCUSE_LABEL, EXPERIMENT_TEMPLATE, IDEAS, PROFILE_ID, dayName,
   type Excuse, type Profile, type Tone,
 } from '../lib/simple';
 import { NumInput } from '../ui';
@@ -27,6 +27,9 @@ export const DEFAULT_PROFILE: Draft = {
   imagen: 'Una mejora de imagen personal (ropa, corte o postura)',
   imagenDay: 5,
   tone: 'duro',
+  incomeTarget: 4_000_000,
+  fixed: DEFAULT_FIXED,
+  phoneLimit: 1,
 };
 
 const WEEK: [number, string][] = [[1, 'Lu'], [2, 'Ma'], [3, 'Mi'], [4, 'Ju'], [5, 'Vi'], [6, 'Sá'], [0, 'Do']];
@@ -51,7 +54,7 @@ const toggle = <T,>(arr: T[], v: T) => (arr.includes(v) ? arr.filter((x) => x !=
 export function Wizard({ onDone }: { onDone: () => void }) {
   const s = useStore();
   const existing = s.get('sprofile', PROFILE_ID);
-  const [p, setP] = useState<Draft>(existing ?? DEFAULT_PROFILE);
+  const [p, setP] = useState<Draft>(existing ? { ...DEFAULT_PROFILE, ...existing } : DEFAULT_PROFILE);
   const [step, setStep] = useState(0);
   const [expIdea, setExpIdea] = useState<string>(existing?.experiment?.idea ?? p.ideas[0] ?? '');
   const up = (x: Partial<Draft>) => setP((o) => ({ ...o, ...x }));
@@ -67,7 +70,9 @@ export function Wizard({ onDone }: { onDone: () => void }) {
           <NumInput value={p.incomeNow} onChange={(n) => up({ incomeNow: n ?? 0 })} />
           <label className="s-label">Mínimo para auto y mudarte</label>
           <NumInput value={p.incomeMin} onChange={(n) => up({ incomeMin: n ?? 0 })} />
-          <label className="s-label">Meta a largo plazo</label>
+          <label className="s-label">Meta a 3 meses</label>
+          <NumInput value={p.incomeTarget ?? null} onChange={(n) => up({ incomeTarget: n ?? undefined })} />
+          <label className="s-label">Sueño a largo plazo</label>
           <NumInput value={p.incomeDream} onChange={(n) => up({ incomeDream: n ?? 0 })} />
           {gap > 0 && (
             <p className="s-callout">
@@ -160,6 +165,40 @@ export function Wizard({ onDone }: { onDone: () => void }) {
           />
           <Pills value={p.imagenDay} options={WEEK} onChange={(d) => up({ imagenDay: d })} />
         </>
+      ),
+    },
+    {
+      q: 'Tareas fijas: ¿qué día y a qué hora?',
+      sub: 'Te propongo estos días. Cambialos como te sirva. Lo que tiene lugar fijo no compite con lo demás.',
+      body: (
+        <>
+          {(p.fixed ?? []).map((f) => (
+            <div key={f.id} className="s-fixed">
+              <div className="s-fixed-top">
+                <input className="s-input flat" value={f.title} onChange={(e) => up({ fixed: p.fixed!.map((x) => (x.id === f.id ? { ...x, title: e.target.value } : x)) })} />
+                <button className="s-btn text small danger" onClick={() => up({ fixed: p.fixed!.filter((x) => x.id !== f.id) })} aria-label="Quitar">✕</button>
+              </div>
+              <div className="s-fixed-row">
+                <select className="s-input s-sel" value={f.day} onChange={(e) => up({ fixed: p.fixed!.map((x) => (x.id === f.id ? { ...x, day: Number(e.target.value) } : x)) })}>
+                  {WEEK.map(([v]) => <option key={v} value={v}>{dayName(v)}</option>)}
+                </select>
+                <input className="s-input s-sel" type="time" value={f.time} onChange={(e) => up({ fixed: p.fixed!.map((x) => (x.id === f.id ? { ...x, time: e.target.value } : x)) })} />
+              </div>
+            </div>
+          ))}
+          <p className="s-muted small">Podés agregar más después, en Semana.</p>
+        </>
+      ),
+    },
+    {
+      q: '¿Cuánto celular de ocio por día te permitís?',
+      sub: 'En tu planilla registraste unas 37,5 h de ocio en una semana, más de 5 h por día. Elegí un límite que puedas cumplir y bajalo de a poco.',
+      body: (
+        <Pills<number>
+          value={p.phoneLimit ?? 1}
+          options={[[0.5, '30 min'], [1, '1 h'], [2, '2 h'], [3, '3 h']]}
+          onChange={(v) => up({ phoneLimit: v })}
+        />
       ),
     },
     {
