@@ -88,14 +88,14 @@ export async function initSync() {
 export async function signIn(email: string, password: string) {
   const c = getClient();
   if (!c) throw new Error('Primero configurá Supabase.');
-  const { error } = await c.auth.signInWithPassword({ email, password });
+  const { error } = await c.auth.signInWithPassword({ email: email.trim(), password });
   if (error) throw new Error(translateAuth(error.message));
 }
 
 export async function signUp(email: string, password: string): Promise<string> {
   const c = getClient();
   if (!c) throw new Error('Primero configurá Supabase.');
-  const { data, error } = await c.auth.signUp({ email, password });
+  const { data, error } = await c.auth.signUp({ email: email.trim(), password });
   if (error) throw new Error(translateAuth(error.message));
   return data.session ? 'Cuenta creada y sesión iniciada.' : 'Cuenta creada. Revisá tu email para confirmarla y después iniciá sesión.';
 }
@@ -108,6 +108,12 @@ function translateAuth(m: string): string {
   if (/invalid login/i.test(m)) return 'Email o contraseña incorrectos.';
   if (/not confirmed/i.test(m)) return 'Tenés que confirmar el email (revisá tu bandeja).';
   if (/password/i.test(m) && /6/.test(m)) return 'La contraseña debe tener al menos 6 caracteres.';
+  if (/rate limit/i.test(m)) return 'Supabase limita los emails por hora. Esperá 1 hora, o desactivá "Confirm email" en Supabase (Authentication → Sign In / Providers → Email) y probá de nuevo.';
+  if (/already registered|already exists/i.test(m)) return 'Ese email ya tiene cuenta: usá "Iniciar sesión".';
+  if (/signups? not allowed|signup.*disabled/i.test(m)) return 'Los registros están desactivados en Supabase. Activá "Allow new users to sign up" en Authentication → Sign In / Providers.';
+  if (/email.*(invalid|format)/i.test(m)) return 'El email no es válido. Revisá que no tenga espacios.';
+  if (/fetch|network/i.test(m)) return 'Sin conexión con Supabase. Revisá internet o si el proyecto de Supabase está pausado.';
+  if (/api key|apikey|jwt/i.test(m)) return 'La clave de Supabase no es válida. Revisá la URL y la publishable key.';
   return m;
 }
 
