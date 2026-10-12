@@ -5,7 +5,7 @@ import { ROLE_LABEL, TYPE_LABEL } from '../lib/types';
 import { addDays, daysBetween, short, today } from '../lib/dates';
 import { goalCurrent, goalProgress, slotConflict, fmtMoney } from '../lib/model';
 import { setProjectStatus } from '../lib/actions';
-import { Bar, Chips, Empty, Field, Sheet, Toggle, toast } from '../ui';
+import { Bar, Chips, Empty, Field, NumInput, Sheet, Toggle, toast } from '../ui';
 import { TaskSheet } from '../forms';
 
 type Tab = 'goals' | 'projects' | 'tasks' | 'ideas';
@@ -101,7 +101,6 @@ function GoalSheet({ goal, longs, onClose }: { goal?: Goal; longs: Goal[]; onClo
   );
   const [err, setErr] = useState('');
   const up = (p: Partial<Goal>) => setF((x) => ({ ...x, ...p }));
-  const num = (v: string) => (v === '' ? null : Number(v.replace(',', '.')));
 
   const save = () => {
     if (!f.title?.trim()) return setErr('Poné un nombre.');
@@ -135,14 +134,14 @@ function GoalSheet({ goal, longs, onClose }: { goal?: Goal; longs: Goal[]; onClo
       </div>
       <div className="grid2">
         <Field label="Base (valor actual)" hint="Lo que ya tenés hoy (ej.: USD ya ahorrados).">
-          <input inputMode="decimal" value={f.baseline ?? 0} onChange={(e) => up({ baseline: num(e.target.value) ?? 0 })} />
+          <NumInput value={f.baseline ?? 0} onChange={(n) => up({ baseline: n ?? 0 })} />
         </Field>
         <Field label="Objetivo" hint="Vacío hasta tener datos que lo justifiquen.">
-          <input inputMode="decimal" value={f.target ?? ''} onChange={(e) => up({ target: num(e.target.value) })} />
+          <NumInput value={f.target} onChange={(n) => up({ target: n })} />
         </Field>
       </div>
       {f.source === 'manual' && (
-        <Field label="Valor actual"><input inputMode="decimal" value={f.manualCurrent ?? 0} onChange={(e) => up({ manualCurrent: num(e.target.value) ?? 0 })} /></Field>
+        <Field label="Valor actual"><NumInput value={f.manualCurrent ?? 0} onChange={(n) => up({ manualCurrent: n ?? 0 })} /></Field>
       )}
       <div className="grid2">
         <Field label="Desde"><input type="date" value={f.startDate} onChange={(e) => up({ startDate: e.target.value })} /></Field>
@@ -309,7 +308,7 @@ export function ProjectSheet({ project, defaults, onClose, onConflict, onSaved }
           </Field>
           <div className="grid2">
             <Field label="Fecha de decisión"><input type="date" value={f.deadline ?? ''} onChange={(e) => up({ deadline: e.target.value })} /></Field>
-            <Field label="Presupuesto máx. (ARS)"><input inputMode="numeric" value={f.budget ?? ''} onChange={(e) => up({ budget: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+            <Field label="Presupuesto máx. (ARS)"><NumInput integer value={f.budget} onChange={(n) => up({ budget: n ?? undefined })} /></Field>
           </div>
           <Field label="Potencial de crecimiento">
             <Chips<number> value={f.growth} options={[[1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5']]} onChange={(v) => up({ growth: v })} />

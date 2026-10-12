@@ -58,3 +58,16 @@ export function short(s: string): string {
   const d = fromISO(s);
   return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
+
+/**
+ * Convierte un número escrito a la argentina: "1.500.000", "1500,50", "$ 2.000", "US$ 300".
+ * Devuelve null si está vacío o no es un número.
+ */
+export function parseNum(raw: string): number | null {
+  let s = raw.replace(/[^\d.,-]/g, '');
+  if (!s || s === '-') return null;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  else if ((s.match(/\./g) ?? []).length > 1 || /\.\d{3}$/.test(s)) s = s.replace(/\./g, '');
+  const n = Number(s);
+  return isFinite(n) ? n : null;
+}

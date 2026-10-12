@@ -4,7 +4,7 @@ import { getSettings, saveSettings } from '../lib/model';
 import { clearConfig, getConfig, saveConfig, signIn, signOut, signUp, subscribeSync, syncNow, syncState } from '../lib/sync';
 import { CSV_KINDS, download, exportCSV, exportJSON, parseBackup } from '../lib/export';
 import { today } from '../lib/dates';
-import { Field, toast } from '../ui';
+import { Field, NumInput, toast } from '../ui';
 
 export function SettingsScreen() {
   const s = useStore();
@@ -46,7 +46,7 @@ export function SettingsScreen() {
       <section className="card">
         <h3>Planificación</h3>
         <Field label="Tiempo libre por defecto (min)">
-          <input type="number" inputMode="numeric" value={settings.defaultAvailableMin} onChange={(e) => saveSettings(s, { defaultAvailableMin: Number(e.target.value) || 0 })} />
+          <NumInput integer value={settings.defaultAvailableMin} onChange={(n) => n != null && saveSettings(s, { defaultAvailableMin: n })} />
         </Field>
         <Field label={`Factor de realismo: ${Math.round(settings.realism * 100)}%`} hint="Qué parte del tiempo libre se convierte en trabajo enfocado. Empieza en 60% (la gente subestima cuánto tarda). Ajustalo con tus datos de cumplimiento.">
           <input type="range" min={0.3} max={0.9} step={0.05} value={settings.realism} onChange={(e) => saveSettings(s, { realism: Number(e.target.value) })} />

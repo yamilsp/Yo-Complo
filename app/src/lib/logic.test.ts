@@ -239,3 +239,17 @@ describe('fechas y respaldo', () => {
     expect(() => parseBackup('no json')).toThrow();
   });
 });
+
+import { parseNum } from './dates';
+describe('parseNum', () => {
+  it('entiende formato argentino', () => {
+    expect(parseNum('1.500.000')).toBe(1500000);
+    expect(parseNum('1500,50')).toBe(1500.5);
+    expect(parseNum('$ 2.000')).toBe(2000);
+    expect(parseNum('US$ 300')).toBe(300);
+    expect(parseNum('1.5')).toBe(1.5);
+    expect(parseNum('-200')).toBe(-200);
+    expect(parseNum('')).toBeNull();
+    expect(parseNum('abc')).toBeNull();
+  });
+});

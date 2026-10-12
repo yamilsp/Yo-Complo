@@ -7,7 +7,7 @@ import { fmtMoney, goalCurrent, goalProgress, moneySum, monthRange, snapshot, ty
 import { achievements, balance, pointsBetween, strategicProgress } from '../lib/points';
 import { coach } from '../lib/coach';
 import { consistency } from './Habits';
-import { Bar, Chips, Empty, Field, Sheet, toast } from '../ui';
+import { Bar, Chips, Empty, Field, NumInput, Sheet, toast } from '../ui';
 
 type Period = 'week' | 'month';
 
@@ -191,7 +191,7 @@ function RewardSheet({ onClose }: { onClose: () => void }) {
     <Sheet title="Nueva recompensa" onClose={onClose}>
       <Field label="Recompensa"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej.: salida con amigos" /></Field>
       <Field label="Costo en puntos" hint="Referencia: una semana sólida con resultados ronda 150–300 pts.">
-        <input type="number" inputMode="numeric" value={cost} onChange={(e) => setCost(Number(e.target.value))} />
+        <NumInput integer value={cost} onChange={(n) => setCost(n ?? 0)} />
       </Field>
       <div className="actions">
         <button className="primary" disabled={!title.trim() || cost < 1} onClick={() => { s.create('reward', { kind: 'reward', title: title.trim(), cost }); onClose(); }}>Guardar</button>

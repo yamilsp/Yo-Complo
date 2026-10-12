@@ -3,8 +3,8 @@ import { useStore } from './lib/store';
 import type { MissCause, ResultKind, Task, TaskType } from './lib/types';
 import { CAUSE_LABEL, RESULT_LABEL, ROLE_LABEL } from './lib/types';
 import { newTask } from './lib/actions';
-import { today } from './lib/dates';
-import { Chips, Field, Sheet, Toggle, toast } from './ui';
+import { parseNum, today } from './lib/dates';
+import { Chips, Field, NumInput, Sheet, Toggle, toast } from './ui';
 
 const CAUSES = Object.entries(CAUSE_LABEL) as [MissCause, string][];
 
@@ -62,7 +62,7 @@ export function TaskSheet({ task, defaults, onClose }: { task?: Task; defaults?:
       </div>
       <div className="grid2">
         <Field label="Minutos estimados">
-          <input type="number" inputMode="numeric" min={5} step={5} value={f.estimateMin ?? ''} onChange={(e) => up({ estimateMin: Number(e.target.value) })} />
+          <NumInput integer value={f.estimateMin} onChange={(n) => up({ estimateMin: n ?? undefined })} />
         </Field>
         <Field label="Fecha límite real">
           <input type="date" value={f.dueDate ?? ''} onChange={(e) => up({ dueDate: e.target.value || undefined })} />
@@ -98,7 +98,7 @@ export function LogSheet({ onClose, taskId, initial }: { onClose: () => void; ta
   const save = () => {
     const date = today();
     if (mode === 'result') {
-      const a = Number(amount.replace(/\./g, '').replace(',', '.'));
+      const a = parseNum(amount) ?? NaN;
       if (money && (!amount || !isFinite(a) || a === 0)) return setErr('Ingresá un monto (negativo si retirás ahorro).');
       if (!money && (!qty || qty < 1)) return setErr('La cantidad debe ser 1 o más.');
       s.create('result', {

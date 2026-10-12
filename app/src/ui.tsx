@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { parseNum } from './lib/dates';
 
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
@@ -68,3 +69,41 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
 let toastFn: ((m: string) => void) | null = null;
 export const setToaster = (f: (m: string) => void) => (toastFn = f);
 export const toast = (m: string) => toastFn?.(m);
+
+/** Campo numérico tolerante: acepta "1.500.000", "1500,5", "$ 2.000". Nunca muestra NaN. */
+export function NumInput({ value, onChange, placeholder, integer }: {
+  value: number | null | undefined; onChange: (n: number | null) => void; placeholder?: string; integer?: boolean;
+}) {
+  const fmt = (n: number | null | undefined) => (n == null || !isFinite(n) ? '' : n.toLocaleString('es-AR', { maximumFractionDigits: 2 }));
+  const [text, setText] = useState(fmt(value));
+  const [bad, setBad] = useState(false);
+  const focused = useRef(false);
+  // Solo se re-sincroniza desde afuera cuando no se está escribiendo.
+  useEffect(() => {
+    if (!focused.current) setText(fmt(value));
+  }, [value]);
+  return (
+    <>
+      <input
+        inputMode={integer ? 'numeric' : 'decimal'}
+        value={text}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setText(e.target.value);
+          const n = parseNum(e.target.value);
+          setBad(e.target.value.trim() !== '' && n == null);
+          onChange(n == null ? null : integer ? Math.round(n) : n);
+        }}
+        onFocus={(e) => {
+          focused.current = true;
+          e.target.select();
+        }}
+        onBlur={() => {
+          focused.current = false;
+          if (!bad) setText(fmt(parseNum(text)));
+        }}
+      />
+      {bad && <small className="error">Escribí solo números (ej.: 1.500.000)</small>}
+    </>
+  );
+}
