@@ -220,3 +220,14 @@ body:has(.s-app) { background: var(--s-bg, #f8f9fc); }
 .s-composer .s-btn { min-width: 48px; height: 48px; padding: 0; }
 .s-nav button { max-width: 96px; }
 .s-nav-ic { width: 48px; }
+
+/* --- Entregables --- */
+.s-timer.done { font-size: 28px; color: var(--s-green); }
+.s-toggle-row { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 4px; font-size: 13.5px; line-height: 1.4; }
+.s-toggle-row input { width: 22px; height: 22px; min-height: 0; flex: none; accent-color: var(--s-primary); margin-top: 1px; }
+.s-deliv { border-top: 1px solid var(--s-line); padding: 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.s-deliv:first-of-type { border-top: 0; }
+.s-row-between { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.s-minibar { height: 6px; border-radius: 3px; background: var(--s-gray-soft); overflow: hidden; }
+.s-minibar div { height: 100%; background: var(--s-primary); border-radius: 3px; }
+.s-minibar div.over { background: var(--s-red); }

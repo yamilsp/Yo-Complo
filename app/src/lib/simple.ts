@@ -80,6 +80,9 @@ export interface PlanItem {
   min: string;
   done: boolean;
   time?: string;
+  /** Marca la tarea como entregable: pide versión 1, tiempo máximo y a quién mostrarlo. */
+  deliverable?: boolean;
+  delivId?: string;
 }
 
 export interface DayPlan extends Base {
@@ -486,8 +489,8 @@ export function guessArea(text: string): Area {
   return 'extra';
 }
 
-/** Prioridad por área según tus metas: plata, después relaciones, después salud. */
-export const AREA_RANK: Record<Area, number> = { caja: 0, social: 1, salud: 2, experimento: 3, fijo: 4, imagen: 5, extra: 6 };
+/** Prioridad por área según tus metas: plata (caja e ingreso extra), después relaciones, después salud. */
+export const AREA_RANK: Record<Area, number> = { caja: 0, experimento: 1, social: 2, salud: 3, fijo: 4, imagen: 5, extra: 6 };
 
 export function suggestQuadrant(text: string, area: Area): Quadrant {
   if (area === 'experimento') return 'idea';
@@ -648,4 +651,83 @@ function parseEvent(ev: Record<string, string>, exdates: string[], date: string)
   if (r.FREQ === 'MONTHLY' && !r.BYDAY) return date.slice(8) === st.date.slice(8) ? res : null;
   if (r.FREQ === 'YEARLY') return date.slice(5) === st.date.slice(5) ? res : null;
   return null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Versión 1 con entrega + Mostrar antes de pulir                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Un entregable: algo que se termina y se muestra. Se define "suficientemente bueno"
+ * y un tiempo máximo antes de empezar; al agotarse, se entrega como está.
+ * Se mide cuántas personas lo vieron, no cuántas horas llevó.
+ */
+export interface Deliverable extends Base {
+  kind: 'sdeliv';
+  title: string;
+  good: string;
+  maxMin: number;
+  audience: string;
+  showBy: string;
+  spentMin: number;
+  graceUsed: boolean;
+  status: 'open' | 'shipped' | 'dropped';
+  seen: number;
+  v2?: string;
+  shippedAt?: string;
+}
+
+export const FOCUS_BLOCK_MIN = 50;
+export const GRACE_MIN = 25;
+
+export function needsDeliverable(it: PlanItem): boolean {
+  return !!it.deliverable || it.area === 'experimento';
+}
+
+export function delivState(d: Deliverable, today: string): 'ok' | 'time_up' | 'late' {
+  if (d.spentMin >= d.maxMin + (d.graceUsed ? GRACE_MIN : 0)) return 'time_up';
+  if (d.showBy < today) return 'late';
+  return 'ok';
+}
+
+/** El coach del perfeccionismo: horas sin que nadie lo vea, entregas vencidas, tiempo agotado. */
+export function delivCoach(delivs: Deliverable[], today: string): Insight[] {
+  const out: Insight[] = [];
+  for (const d of delivs.filter((x) => x.status === 'open')) {
+    const st = delivState(d, today);
+    const h = (d.spentMin / 60).toFixed(1).replace('.', ',');
+    if (st === 'time_up') {
+      out.push({
+        id: 'deliv_time_' + d.id, level: 3,
+        title: `Se terminó el tiempo de "${d.title}"`,
+        evidence: `Le dedicaste ${h} h de ${(d.maxMin / 60).toFixed(1).replace('.', ',')} h previstas.`,
+        fixes: [`Entregalo como está: mostrásela hoy a ${d.audience || '3 personas'}.`, 'Anotá qué mejorarías en una versión 2. Lo perfecto llega iterando con respuestas reales, no puliendo solo.'],
+      });
+    } else if (d.spentMin >= 180 && d.seen === 0) {
+      out.push({
+        id: 'deliv_unseen_' + d.id, level: 3,
+        title: `Llevás ${h} h en "${d.title}" y nadie lo vio`,
+        evidence: `Tenías que mostrarlo a ${d.audience || 'alguien'} antes del ${d.showBy}.`,
+        fixes: ['Hoy, antes de seguir: mostrá lo que tenés a 3 personas y preguntá qué les sirve.', 'Lo que no se muestra no existe para el mercado.'],
+      });
+    } else if (st === 'late') {
+      out.push({
+        id: 'deliv_late_' + d.id, level: 2,
+        title: `"${d.title}" tenía que mostrarse el ${d.showBy}`,
+        evidence: d.spentMin ? `Llevás ${h} h.` : 'Todavía no empezaste.',
+        fixes: ['Mostrá la versión que tengas hoy, aunque sea fea.', 'Si ya no te importa, descartala: arrastrarla también cuesta.'],
+      });
+    }
+  }
+  const shipped = delivs.filter((x) => x.status === 'shipped' && x.shippedAt && daysBetween(x.shippedAt, today) <= 30);
+  const unseen = shipped.filter((x) => x.seen === 0);
+  if (shipped.length >= 2 && unseen.length / shipped.length >= 0.5) {
+    out.push({
+      id: 'deliv_noaudience', level: 2,
+      title: 'Terminás cosas que no ve nadie',
+      evidence: `${unseen.length} de ${shipped.length} entregas del último mes las vieron 0 personas.`,
+      fixes: ['Antes de empezar el próximo, conseguí 3 personas que quieran verlo (mensaje, grupo, cliente).', 'Elegí proyectos donde ya sabés quién lo va a usar.'],
+    });
+  }
+  return out;
 }

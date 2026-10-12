@@ -1,6 +1,6 @@
 import type { Store } from './store';
 import { addDays, pretty, today, weekStart } from './dates';
-import { AREA, EXCUSE_LABEL, QUADRANT_LABEL, dayName, logCoach, planId, simpleCoach, weekId, weeklyNeeded, type Area, type Profile, type Quadrant } from './simple';
+import { AREA, EXCUSE_LABEL, QUADRANT_LABEL, dayName, delivCoach, logCoach, planId, simpleCoach, weekId, weeklyNeeded, type Area, type Profile, type Quadrant } from './simple';
 
 export interface AssistantAction {
   kind: 'hoy' | 'ordenar';
@@ -48,7 +48,9 @@ export function buildContext(s: Store, p: Profile): string {
   }
   const misses = plans.filter((x) => x.date >= addDays(d, -14) && x.excuse).map((x) => EXCUSE_LABEL[x.excuse!]);
   if (misses.length) lines.push(`Excusas registradas en 14 días: ${misses.join(', ')}.`);
-  const insights = [...simpleCoach(p, plans, s.all('sweek'), d), ...logCoach(p, plans, d)];
+  const delivs = s.all('sdeliv').filter((x) => x.status === 'open');
+  if (delivs.length) lines.push(`Entregables abiertos: ${delivs.map((x) => `${x.title} (v1: ${x.good}; ${Math.round(x.spentMin / 60 * 10) / 10} h de ${x.maxMin / 60} h; mostrar a ${x.audience} el ${x.showBy}; vistas ${x.seen})`).join(' | ')}.`);
+  const insights = [...delivCoach(s.all('sdeliv'), d), ...simpleCoach(p, plans, s.all('sweek'), d), ...logCoach(p, plans, d)];
   if (insights.length) lines.push(`Alertas del coach: ${insights.map((i) => `${i.title} (${i.evidence})`).join(' | ')}.`);
   const notes = s.all('snote').filter((n) => n.status === 'open');
   if (notes.length) lines.push(`Pendientes en Ordenar: ${notes.slice(0, 25).map((n) => `${n.text} [${QUADRANT_LABEL[n.quadrant ?? 'idea'].title}]`).join('; ')}.`);

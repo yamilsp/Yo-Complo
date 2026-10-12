@@ -1,7 +1,7 @@
 import type { Store } from './store';
 import type { AnyRec, Kind } from './types';
 
-const KINDS: Kind[] = ['goal', 'project', 'task', 'idea', 'habit', 'habitLog', 'day', 'result', 'obstacle', 'review', 'reward', 'redemption', 'settings', 'sprofile', 'splan', 'sweek', 'snote'];
+const KINDS: Kind[] = ['goal', 'project', 'task', 'idea', 'habit', 'habitLog', 'day', 'result', 'obstacle', 'review', 'reward', 'redemption', 'settings', 'sprofile', 'splan', 'sweek', 'snote', 'sdeliv'];
 
 export function exportJSON(s: Store): string {
   return JSON.stringify({ app: 'yo-complo', version: 1, exportedAt: new Date().toISOString(), records: s.dump() }, null, 2);

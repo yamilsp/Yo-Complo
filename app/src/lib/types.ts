@@ -15,7 +15,8 @@ export type Kind =
   | 'sprofile'
   | 'splan'
   | 'sweek'
-  | 'snote';
+  | 'snote'
+  | 'sdeliv';
 
 export interface Base {
   id: string;
@@ -223,7 +224,8 @@ export type AnyRec =
   | import('./simple').Profile
   | import('./simple').DayPlan
   | import('./simple').WeekRec
-  | import('./simple').Note;
+  | import('./simple').Note
+  | import('./simple').Deliverable;
 
 export type RecOf<K extends Kind> = Extract<AnyRec, { kind: K }>;
 

@@ -2,10 +2,10 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from '../lib/store';
 import { addDays, daysBetween, pretty, range, today, weekStart } from '../lib/dates';
 import {
-  AREA, AREA_RANK, EMPTY_LOG, EXCUSE_FIX, EXCUSE_LABEL, EXPERIMENT_TEMPLATE, PROFILE_ID, QUADRANT_LABEL,
+  AREA, AREA_RANK, EMPTY_LOG, FOCUS_BLOCK_MIN, GRACE_MIN, delivCoach, delivState, needsDeliverable, EXCUSE_FIX, EXCUSE_LABEL, EXPERIMENT_TEMPLATE, PROFILE_ID, QUADRANT_LABEL,
   cajaStreak, dayName, defaultResults, eventsForDate, gcalLink, generatePlan, guessArea, logCoach, planId, replan,
   simpleCoach, splitTasks, suggestQuadrant, weekId, weeklyNeeded, withDefaults,
-  type Area, type CalEvent, type ChangeReason, type DayLog, type DayPlan, type Excuse, type Energy, type FixedTask,
+  type Area, type CalEvent, type Deliverable, type ChangeReason, type DayLog, type DayPlan, type Excuse, type Energy, type FixedTask,
   type Note, type PlanItem, type Profile, type Quadrant, type WeekRec,
 } from '../lib/simple';
 import { NumInput, toast } from '../ui';
@@ -119,7 +119,7 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
   const plan = useDayPlan(p, d);
   const plans = s.all('splan');
   const weeks = s.all('sweek');
-  const insights = [...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
+  const insights = [...delivCoach(s.all('sdeliv'), d), ...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
   const streak = cajaStreak(plans, d);
   const week = s.get('sweek', weekId(weekStart(d)));
   const cal = useCalendar(p.icalUrl, d);
@@ -281,15 +281,22 @@ function ChangeSheet({ plan, onClose }: { plan: DayPlan; onClose: () => void }) 
   );
 }
 
-/** Modo foco: elige la próxima acción y la reduce a 2 minutos para empezar. */
+/**
+ * Modo foco: una sola tarea, bloque de 50 min, arranque de 2 minutos.
+ * Si es un entregable: antes de empezar se define la versión 1, el tiempo máximo y a quién se muestra;
+ * al agotarse el tiempo, se entrega como está.
+ */
 function Focus({ plan, onClose }: { plan: DayPlan; onClose: () => void }) {
   const s = useStore();
+  const d = today();
   const pending = plan.items.filter((i) => !i.done && !/^Jornada/.test(i.title));
   const it = pending.find((i) => i.area === 'caja') ?? pending.sort((a, b) => AREA_RANK[a.area] - AREA_RANK[b.area])[0];
-  const [start] = useState(Date.now());
+  const deliv = it ? findDeliverable(s, it) : undefined;
+  const [start, setStart] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
   const [why, setWhy] = useState(false);
   const [excuse, setExcuse] = useState<Excuse | null>(null);
+  const [ship, setShip] = useState(false);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -301,24 +308,46 @@ function Focus({ plan, onClose }: { plan: DayPlan; onClose: () => void }) {
         <button className="s-btn filled block" onClick={onClose}>Listo</button>
       </Sheet>
     );
+
+  if (needsDeliverable(it) && !deliv) return <DeliverableSetup item={it} plan={plan} onClose={onClose} onReady={() => setStart(Date.now())} />;
+  if (deliv && (ship || delivState(deliv, d) === 'time_up')) return <ShipSheet deliv={deliv} item={it} plan={plan} timeUp={!ship} onClose={onClose} />;
+
   const secs = Math.floor((now - start) / 1000);
+  const left = FOCUS_BLOCK_MIN * 60 - secs;
+  const spentNow = Math.floor(secs / 60);
+  const logSpent = () => deliv && spentNow > 0 && s.update('sdeliv', deliv.id, { spentMin: deliv.spentMin + spentNow });
   const mark = () => {
+    logSpent();
+    if (deliv) return setShip(true);
     setItems(s, plan, plan.items.map((x) => (x.id === it.id ? { ...x, done: true } : x)));
     toast('Hecho. Un voto más.');
     onClose();
   };
+  const budget = deliv ? deliv.maxMin + (deliv.graceUsed ? GRACE_MIN : 0) : 0;
   return (
-    <Sheet title="Ahora" onClose={onClose}>
+    <Sheet title="Ahora: una sola cosa" onClose={() => { logSpent(); onClose(); }}>
       <span className={'s-chip ' + AREA[it.area].color}>{AREA[it.area].label}</span>
       <h2 className="s-focus-title">{it.title}</h2>
       {!why ? (
         <>
-          <div className="s-callout">
-            <b>Empezá con 2 minutos:</b> {it.min}.<br />
-            Celular en otra habitación. Después decidís si seguís.
+          {deliv ? (
+            <div className="s-callout small">
+              <b>Versión 1:</b> {deliv.good}<br />
+              <b>Se lo mostrás a:</b> {deliv.audience} · {deliv.showBy === d ? 'hoy' : deliv.showBy}<br />
+              <b>Tiempo:</b> {fmtMin(deliv.spentMin + spentNow)} de {fmtMin(budget)}. Al agotarse, se entrega como está.
+            </div>
+          ) : (
+            <div className="s-callout">
+              <b>Empezá con 2 minutos:</b> {it.min}.<br />
+              Celular en otra habitación. Solo esto hasta que suene el bloque.
+            </div>
+          )}
+          <div className={'s-timer' + (left <= 0 ? ' done' : '')}>
+            {left > 0 ? `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}` : 'Bloque cumplido'}
           </div>
-          <div className="s-timer">{String(Math.floor(secs / 60)).padStart(2, '0')}:{String(secs % 60).padStart(2, '0')}</div>
-          <button className="s-btn filled block" onClick={mark}>Listo ✓</button>
+          {left <= 0 && <p className="s-muted small s-center">Pausa de 5 minutos lejos de la pantalla. Después, otro bloque o la próxima tarea.</p>}
+          <button className="s-btn filled block" onClick={mark}>{deliv ? 'Terminé la versión 1' : 'Listo ✓'}</button>
+          {deliv && <button className="s-btn tonal block" onClick={() => { logSpent(); toast(`Guardado: ${fmtMin(deliv.spentMin + spentNow)} invertidos.`); onClose(); }}>Pausar (sigue otro día)</button>}
           <button className="s-btn text block" onClick={() => setWhy(true)}>Ahora no puedo</button>
         </>
       ) : !excuse ? (
@@ -334,10 +363,80 @@ function Focus({ plan, onClose }: { plan: DayPlan; onClose: () => void }) {
         <>
           <p><b>{EXCUSE_LABEL[excuse]}.</b> Probá esto:</p>
           <ol className="s-fixes">{EXCUSE_FIX[excuse].map((f) => <li key={f}>{f}</li>)}</ol>
-          <button className="s-btn filled block" onClick={() => { setWhy(false); setExcuse(null); }}>Ok, hago los 2 minutos</button>
-          <button className="s-btn text block" onClick={onClose}>Hoy no</button>
+          <button className="s-btn filled block" onClick={() => { setWhy(false); setExcuse(null); setStart(Date.now()); }}>Ok, hago los 2 minutos</button>
+          <button className="s-btn text block" onClick={() => { logSpent(); onClose(); }}>Hoy no</button>
         </>
       )}
+    </Sheet>
+  );
+}
+
+/** Busca el entregable abierto de una tarea (por vínculo o por título, para que siga entre días). */
+function findDeliverable(s: ReturnType<typeof useStore>, it: PlanItem): Deliverable | undefined {
+  const open = s.all('sdeliv').filter((x) => x.status === 'open');
+  return (it.delivId ? s.get('sdeliv', it.delivId) : undefined) ?? open.find((x) => x.title === it.title);
+}
+
+const SHOW_WHEN: [number, string][] = [[0, 'Hoy'], [1, 'Mañana'], [3, 'En 3 días'], [7, 'En una semana']];
+const MAX_TIME: [number, string][] = [[60, '1 h'], [120, '2 h'], [180, '3 h'], [300, '5 h']];
+
+function DeliverableSetup({ item, plan, onClose, onReady }: { item: PlanItem; plan: DayPlan; onClose: () => void; onReady: () => void }) {
+  const s = useStore();
+  const [good, setGood] = useState('');
+  const [audience, setAudience] = useState('');
+  const [when, setWhen] = useState(1);
+  const [maxMin, setMax] = useState(120);
+  const [err, setErr] = useState('');
+  const save = () => {
+    if (!good.trim()) return setErr('Definí qué es "suficientemente bueno". Sin eso, nunca termina.');
+    if (!audience.trim()) return setErr('¿A quién se lo vas a mostrar? Si no lo ve nadie, no sirve.');
+    const dv = s.create('sdeliv', { kind: 'sdeliv', title: item.title, good: good.trim(), audience: audience.trim(), showBy: addDays(today(), when), maxMin, spentMin: 0, graceUsed: false, status: 'open', seen: 0 });
+    setItems(s, plan, plan.items.map((x) => (x.id === item.id ? { ...x, delivId: dv.id } : x)));
+    onReady();
+  };
+  return (
+    <Sheet title="Antes de empezar: versión 1" onClose={onClose}>
+      <p className="small"><b>{item.title}</b></p>
+      <p className="s-muted small">Lo perfecto no se termina. Definí cuándo está listo, cuánto tiempo le das y quién lo va a ver.</p>
+      <label className="s-label">¿Qué es "suficientemente bueno"?</label>
+      <input className="s-input" value={good} onChange={(e) => setGood(e.target.value)} placeholder="Ej.: una página con precio, 3 fotos y WhatsApp" />
+      <label className="s-label">¿A quién se lo mostrás?</label>
+      <input className="s-input" value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="Ej.: 3 clientes del Roble / grupo de emprendedores" />
+      <label className="s-label">¿Cuándo?</label>
+      <div className="s-pills">{SHOW_WHEN.map(([v, l]) => <button key={v} className={'s-pill' + (when === v ? ' on' : '')} onClick={() => setWhen(v)}>{l}</button>)}</div>
+      <label className="s-label">Tiempo máximo total</label>
+      <div className="s-pills">{MAX_TIME.map(([v, l]) => <button key={v} className={'s-pill' + (maxMin === v ? ' on' : '')} onClick={() => setMax(v)}>{l}</button>)}</div>
+      {err && <p className="s-warn small">{err}</p>}
+      <button className="s-btn filled block" onClick={save}>Empezar bloque de {FOCUS_BLOCK_MIN} min</button>
+    </Sheet>
+  );
+}
+
+function ShipSheet({ deliv, item, plan, timeUp, onClose }: { deliv: Deliverable; item: PlanItem; plan: DayPlan; timeUp: boolean; onClose: () => void }) {
+  const s = useStore();
+  const [seen, setSeen] = useState(deliv.seen);
+  const [v2, setV2] = useState(deliv.v2 ?? '');
+  const ship = () => {
+    s.update('sdeliv', deliv.id, { status: 'shipped', seen, v2: v2.trim() || undefined, shippedAt: today() });
+    setItems(s, plan, plan.items.map((x) => (x.id === item.id ? { ...x, done: true } : x)));
+    toast(seen > 0 ? `Entregado y visto por ${seen}. Eso vale más que otra semana puliendo.` : 'Entregado. Ahora falta que alguien lo vea: mandalo hoy.');
+    onClose();
+  };
+  return (
+    <Sheet title={timeUp ? 'Se terminó el tiempo' : 'Versión 1 lista'} onClose={onClose}>
+      <p className="small"><b>{deliv.title}</b></p>
+      {timeUp && <p className="s-callout small">Le diste {fmtMin(deliv.spentMin)}. Entregalo como está: lo que falta va a la versión 2, después de ver qué responde la gente.</p>}
+      <p className="small">Acordaste mostrárselo a <b>{deliv.audience}</b>.</p>
+      <Stepper label="¿A cuántas personas se lo mostraste?" value={seen} step={1} onChange={setSeen} />
+      <label className="s-label">¿Qué mejorarías en la versión 2? (opcional)</label>
+      <input className="s-input" value={v2} onChange={(e) => setV2(e.target.value)} placeholder="Lo que te dijeron o lo que viste" />
+      <button className="s-btn filled block" onClick={ship}>Marcar como entregado</button>
+      {timeUp && !deliv.graceUsed && (
+        <button className="s-btn text block" onClick={() => { s.update('sdeliv', deliv.id, { graceUsed: true }); toast(`+${GRACE_MIN} min, una sola vez.`); onClose(); }}>
+          Necesito {GRACE_MIN} min más (una sola vez)
+        </button>
+      )}
+      {!timeUp && <button className="s-btn text block" onClick={onClose}>Todavía no lo mostré</button>}
     </Sheet>
   );
 }
@@ -349,8 +448,9 @@ function ItemSheet({ plan, item, onClose }: { plan: DayPlan; item?: PlanItem; on
   const [minutes, setMinutes] = useState<number | null>(item?.minutes ?? 30);
   const [time, setTime] = useState(item?.time ?? '');
   const [area, setArea] = useState<Area>(item?.area ?? 'extra');
+  const [deliverable, setDeliverable] = useState(!!item?.deliverable || item?.area === 'experimento');
   const tooMany = !item && plan.items.length >= 7;
-  const build = (): PlanItem => ({ id: item?.id ?? `${plan.date}-${Date.now().toString(36)}`, area, title: title.trim(), min: min.trim() || 'Empezar 2 minutos', minutes: minutes ?? 0, done: item?.done ?? false, time: time || undefined });
+  const build = (): PlanItem => ({ id: item?.id ?? `${plan.date}-${Date.now().toString(36)}`, area, title: title.trim(), min: min.trim() || 'Empezar 2 minutos', minutes: minutes ?? 0, done: item?.done ?? false, time: time || undefined, deliverable, delivId: item?.delivId });
   const save = () => {
     if (!title.trim()) return;
     const it = build();
@@ -380,6 +480,10 @@ function ItemSheet({ plan, item, onClose }: { plan: DayPlan; item?: PlanItem; on
           <button key={a} className={'s-pill' + (a === area ? ' on' : '')} onClick={() => setArea(a)}>{AREA[a].label}</button>
         ))}
       </div>
+      <label className="s-toggle-row">
+        <input type="checkbox" checked={deliverable} onChange={(e) => setDeliverable(e.target.checked)} />
+        <span><b>Es un entregable</b> (proyecto, contenido, diseño): pide versión 1, tiempo máximo y a quién mostrarlo.</span>
+      </label>
       {title.trim() && time && (
         <a className="s-btn tonal block s-center-text" href={gcalLink(title.trim(), plan.date, time, minutes || 30)} target="_blank" rel="noreferrer">Agregar a Google Calendar</a>
       )}
@@ -477,7 +581,7 @@ function Week({ p }: { p: Profile }) {
   const plans = s.all('splan');
   const need = weeklyNeeded(p);
   const target = Math.round((p.incomeTarget ?? 4_000_000) / 4.33);
-  const insights = [...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
+  const insights = [...delivCoach(s.all('sdeliv'), d), ...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
   const [change, setChange] = useState(w?.change ?? '');
   if (!w) return null;
 
@@ -567,6 +671,8 @@ function Week({ p }: { p: Profile }) {
         {w.results.length < 3 && <button className="s-btn text" onClick={() => s.update('sweek', w.id, { results: [...w.results, { text: '', done: false }] })}>+ Resultado</button>}
       </section>
 
+      <Deliverables />
+
       <FixedEditor p={p} />
 
       <section className="s-card">
@@ -621,6 +727,44 @@ function Week({ p }: { p: Profile }) {
         <input className="s-input" value={change} onChange={(e) => setChange(e.target.value)} onBlur={() => s.update('sweek', w.id, { change })} placeholder="O escribí el tuyo" />
       </section>
     </div>
+  );
+}
+
+/** Entregas: lo que importa es cuánta gente lo vio, no cuántas horas llevó. */
+function Deliverables() {
+  const s = useStore();
+  const d = today();
+  const all = s.all('sdeliv');
+  const open = all.filter((x) => x.status === 'open');
+  const ws = weekStart(d);
+  const shipped = all.filter((x) => x.status === 'shipped' && (x.shippedAt ?? '') >= addDays(d, -30)).sort((a, b) => (b.shippedAt ?? '').localeCompare(a.shippedAt ?? ''));
+  const seenWeek = all.filter((x) => x.status === 'shipped' && (x.shippedAt ?? '') >= ws).reduce((a, x) => a + x.seen, 0);
+  if (!all.length)
+    return (
+      <section className="s-card">
+        <div className="s-sec-head"><h2>Entregas</h2><small className="s-muted">versión 1 · quién lo vio</small></div>
+        <p className="s-muted small">Cuando empieces un proyecto o contenido, la app te pide la versión 1, el tiempo máximo y a quién mostrárselo. Acá ves cuánta gente vio tu trabajo.</p>
+      </section>
+    );
+  return (
+    <section className="s-card">
+      <div className="s-sec-head"><h2>Entregas</h2><small className="s-muted">{seenWeek} personas lo vieron esta semana</small></div>
+      {open.map((x) => {
+        const st = delivState(x, d);
+        return (
+          <div key={x.id} className="s-deliv">
+            <div className="s-row-between"><b className="small">{x.title}</b><small className={st === 'ok' ? 's-muted' : 's-warn'}>{st === 'time_up' ? 'tiempo agotado' : st === 'late' ? 'vencida' : 'mostrar ' + (x.showBy === d ? 'hoy' : x.showBy.slice(8) + '/' + x.showBy.slice(5, 7))}</small></div>
+            <div className="s-minibar"><div style={{ width: `${Math.min(100, (x.spentMin / x.maxMin) * 100)}%` }} className={x.spentMin >= x.maxMin ? 'over' : ''} /></div>
+            <small className="s-muted">{fmtMin(x.spentMin) || '0 min'} de {fmtMin(x.maxMin)} · v1: {x.good} · para: {x.audience}</small>
+            <div><button className="s-btn text small danger" onClick={() => s.update('sdeliv', x.id, { status: 'dropped' })}>Descartar</button></div>
+          </div>
+        );
+      })}
+      {shipped.length > 0 && <label className="s-label">Entregadas (30 días)</label>}
+      {shipped.map((x) => (
+        <div key={x.id} className="s-note"><span className="small">{x.title}</span><b className={'small ' + (x.seen ? '' : 's-warn')}>{x.seen} {x.seen === 1 ? 'persona' : 'personas'}</b></div>
+      ))}
+    </section>
   );
 }
 

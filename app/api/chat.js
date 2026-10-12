@@ -45,7 +45,8 @@ Reglas:
 - Cada acción: título concreto (verbo + qué + cuánto), minutos realistas y una versión mínima de 2 minutos.
 - Si no hace falta proponer acciones, devolvé la lista vacía.
 - Respuesta ("reply"): máximo 6 líneas. Sin títulos ni markdown pesado; podés usar guiones.
-- Las acciones son propuestas: el usuario las confirma en la app.`;
+- Las acciones son propuestas: el usuario las confirma en la app.
+- Tiende al perfeccionismo, a querer hacer todo a la vez y a invertir horas en cosas que nadie ve. Para proyectos o contenidos: proponé una versión 1 chica con tiempo máximo y a quién mostrársela antes de seguir. Una sola cosa por vez.`;
 
 function bad(res, code, msg) {
   return res.status(code).json({ error: msg });

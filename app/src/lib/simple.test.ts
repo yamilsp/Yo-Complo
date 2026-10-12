@@ -156,3 +156,25 @@ describe('calendario', () => {
     expect(ev.map((e) => e.title)).toEqual(['Feriado', 'Dentista', 'Club emprendedores']);
   });
 });
+
+import { delivCoach, delivState, type Deliverable } from './simple';
+
+describe('versión 1 y mostrar antes de pulir', () => {
+  const D = (x: Partial<Deliverable>): Deliverable => ({
+    id: 'd', kind: 'sdeliv', createdAt: 0, updatedAt: 0, title: 'Web del Roble', good: 'página con precio', maxMin: 120, audience: '3 clientes',
+    showBy: MON, spentMin: 0, graceUsed: false, status: 'open', seen: 0, ...x,
+  });
+  it('estado: tiempo agotado, con gracia de 25 min una vez', () => {
+    expect(delivState(D({ spentMin: 120 }), MON)).toBe('time_up');
+    expect(delivState(D({ spentMin: 120, graceUsed: true }), MON)).toBe('ok');
+    expect(delivState(D({ spentMin: 10, showBy: addDays(MON, -1) }), MON)).toBe('late');
+  });
+  it('3 h sin que nadie lo vea → frena', () => {
+    const f = delivCoach([D({ maxMin: 300, spentMin: 200, showBy: addDays(MON, 2) })], MON);
+    expect(f[0].id).toMatch(/deliv_unseen/);
+  });
+  it('entregas que no ve nadie', () => {
+    const f = delivCoach([1, 2].map((i) => D({ id: 'd' + i, status: 'shipped', shippedAt: addDays(MON, -i), seen: 0 })), MON);
+    expect(f.some((x) => x.id === 'deliv_noaudience')).toBe(true);
+  });
+});
