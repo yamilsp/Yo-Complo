@@ -56,6 +56,7 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
               <p className="s-muted small">El modo avanzado tiene objetivos, proyectos, hábitos y métricas detalladas. Los datos se mantienen.</p>
             </div>
             <SettingsScreen simple />
+            <p className="s-muted small s-center">Versión {__BUILD__}</p>
           </div>
         )}
       </main>
