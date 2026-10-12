@@ -6,7 +6,7 @@ import { CSV_KINDS, download, exportCSV, exportJSON, parseBackup } from '../lib/
 import { today } from '../lib/dates';
 import { Field, NumInput, toast } from '../ui';
 
-export function SettingsScreen() {
+export function SettingsScreen({ simple, onSimple }: { simple?: boolean; onSimple?: () => void } = {}) {
   const s = useStore();
   const st = useSyncExternalStore(subscribeSync, syncState);
   const cfg = getConfig();
@@ -41,9 +41,14 @@ export function SettingsScreen() {
 
   return (
     <div className="screen">
-      <h1>Ajustes</h1>
+      {!simple && <h1>Ajustes</h1>}
+      {onSimple && (
+        <section className="card">
+          <button className="primary block" onClick={onSimple}>Volver al modo simple</button>
+        </section>
+      )}
 
-      <section className="card">
+      {!simple && <section className="card">
         <h3>Planificación</h3>
         <Field label="Tiempo libre por defecto (min)">
           <NumInput integer value={settings.defaultAvailableMin} onChange={(n) => n != null && saveSettings(s, { defaultAvailableMin: n })} />
@@ -51,7 +56,7 @@ export function SettingsScreen() {
         <Field label={`Factor de realismo: ${Math.round(settings.realism * 100)}%`} hint="Qué parte del tiempo libre se convierte en trabajo enfocado. Empieza en 60% (la gente subestima cuánto tarda). Ajustalo con tus datos de cumplimiento.">
           <input type="range" min={0.3} max={0.9} step={0.05} value={settings.realism} onChange={(e) => saveSettings(s, { realism: Number(e.target.value) })} />
         </Field>
-      </section>
+      </section>}
 
       <section className="card">
         <h3>Sincronización</h3>

@@ -11,7 +11,11 @@ export type Kind =
   | 'review'
   | 'reward'
   | 'redemption'
-  | 'settings';
+  | 'settings'
+  | 'sprofile'
+  | 'splan'
+  | 'sweek'
+  | 'snote';
 
 export interface Base {
   id: string;
@@ -215,7 +219,11 @@ export type AnyRec =
   | Review
   | Reward
   | Redemption
-  | Settings;
+  | Settings
+  | import('./simple').Profile
+  | import('./simple').DayPlan
+  | import('./simple').WeekRec
+  | import('./simple').Note;
 
 export type RecOf<K extends Kind> = Extract<AnyRec, { kind: K }>;
 

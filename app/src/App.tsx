@@ -6,6 +6,7 @@ import { Progress } from './screens/Progress';
 import { SettingsScreen } from './screens/Settings';
 import { subscribeSync, syncState } from './lib/sync';
 import { setToaster } from './ui';
+import { SimpleApp } from './simple/SimpleApp';
 
 const TABS: [string, string, string][] = [
   ['hoy', 'Hoy', '◉'],
@@ -15,7 +16,47 @@ const TABS: [string, string, string][] = [
   ['ajustes', 'Ajustes', '⚙'],
 ];
 
-export function App() {
+const MODE_KEY = 'yc:mode';
+function readMode(): 'simple' | 'advanced' {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'advanced' ? 'advanced' : 'simple';
+  } catch {
+    return 'simple';
+  }
+}
+
+/** Modo simple por defecto; el avanzado conserva todo lo construido antes. */
+export function Root() {
+  const [mode, setMode] = useState(readMode);
+  const change = (m: 'simple' | 'advanced') => {
+    try {
+      localStorage.setItem(MODE_KEY, m);
+    } catch {
+      /* sin almacenamiento: solo esta sesión */
+    }
+    setMode(m);
+    window.scrollTo(0, 0);
+  };
+  return mode === 'simple' ? <SimpleRoot onAdvanced={() => change('advanced')} /> : <App onSimple={() => change('simple')} />;
+}
+
+function SimpleRoot({ onAdvanced }: { onAdvanced: () => void }) {
+  const [msg, setMsg] = useState('');
+  useEffect(() => {
+    setToaster((m) => {
+      setMsg(m);
+      setTimeout(() => setMsg((x) => (x === m ? '' : x)), 2500);
+    });
+  }, []);
+  return (
+    <>
+      <SimpleApp onAdvanced={onAdvanced} />
+      {msg && <div className="s-toast" role="status">{msg}</div>}
+    </>
+  );
+}
+
+export function App({ onSimple }: { onSimple: () => void }) {
   const [tab, setTab] = useState(() => location.hash.slice(1) || 'hoy');
   const [msg, setMsg] = useState('');
   const st = useSyncExternalStore(subscribeSync, syncState);
@@ -46,7 +87,7 @@ export function App() {
         {tab === 'plan' && <Plan />}
         {tab === 'habitos' && <Habits />}
         {tab === 'progreso' && <Progress />}
-        {tab === 'ajustes' && <SettingsScreen />}
+        {tab === 'ajustes' && <SettingsScreen onSimple={onSimple} />}
       </main>
       {msg && <div className="toast" role="status">{msg}</div>}
       <nav className="tabbar">

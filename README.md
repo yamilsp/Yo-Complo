@@ -2,7 +2,15 @@
 
 App web instalable (PWA) que conecta objetivos → metas de 30 días → proyectos → acciones diarias, con coach basado en tus datos reales. Funciona en celular y computadora con los mismos datos (Supabase).
 
-## Qué incluye (Etapa 1 / MVP)
+## Modo simple (por defecto)
+
+- **Test inicial** de 9 preguntas que arma tu plan (se puede rehacer en Ajustes).
+- **Hoy**: primero la caja (lo que genera plata), después 1 acción por área (ingreso extra, salud, social, imagen). Botón **"¿Qué hago ahora?"** con regla de 2 minutos y respuesta a tu excusa.
+- **Semana**: plata de la semana contra tu mínimo, 3 resultados, 1 experimento de 7 días a la vez, efecto compuesto (28 días).
+- **Mente**: vaciás la cabeza y cada cosa se clasifica con Eisenhower (hacer / agendar / delegar / eliminar / idea en espera).
+- **Coach** basado en *Hábitos Atómicos* y *El Efecto Compuesto*: detecta en qué venís fallando y qué excusa repetís, y propone cómo facilitarlo.
+
+## Modo avanzado (Etapa 1 / MVP original)
 
 - **Hoy**: máx. 3 prioridades (2 con energía baja), siguiente acción, bloques, hábitos, capacidad realista y triage (postergar / delegar / descartar).
 - **Plan**: objetivos medibles, proyectos con cupo (1 principal + 1 secundario + ingresos + salud), experimentos con criterio de éxito y fecha, acciones tipo *resultado* vs *preparación*, ideas en espera.

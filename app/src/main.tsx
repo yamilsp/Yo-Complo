@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
+import { Root } from './App';
+import './simple/simple.css';
 import { startAutoSync } from './lib/sync';
 import './styles.css';
 
@@ -8,7 +9,7 @@ startAutoSync();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <Root />
   </StrictMode>,
 );
 
