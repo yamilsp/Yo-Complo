@@ -178,3 +178,40 @@ describe('versión 1 y mostrar antes de pulir', () => {
     expect(f.some((x) => x.id === 'deliv_noaudience')).toBe(true);
   });
 });
+
+import { guessDue, quadrantWithDue, dueCoach } from './simple';
+import { dueReminders, DEFAULT_NOTIFY } from './notify';
+
+describe('fechas límite', () => {
+  it('detecta hoy, mañana, día de semana y dd/mm', () => {
+    expect(guessDue('Cobrar hoy', MON)).toBe(MON);
+    expect(guessDue('Llamar mañana', MON)).toBe(addDays(MON, 1));
+    expect(guessDue('Cumple el viernes', MON)).toBe(addDays(MON, 4));
+    expect(guessDue('Pagar 20/10', MON)).toBe('2026-10-20');
+    expect(guessDue('Pagar 5/1', MON)).toBe('2027-01-05');
+    expect(guessDue('Sin fecha', MON)).toBeUndefined();
+  });
+  it('lo importante que vence pronto pasa a hacer hoy', () => {
+    expect(quadrantWithDue('agendar', addDays(MON, 1), MON)).toBe('hacer');
+    expect(quadrantWithDue('agendar', addDays(MON, 6), MON)).toBe('agendar');
+    expect(quadrantWithDue('eliminar', MON, MON)).toBe('eliminar');
+  });
+  it('coach de vencidas', () => {
+    const n = { id: 'n', kind: 'snote' as const, createdAt: 0, updatedAt: 0, text: 'Pagar luz', status: 'open' as const, due: addDays(MON, -2), quadrant: 'hacer' as const };
+    expect(dueCoach([n], MON)[0].evidence).toContain('Pagar luz');
+  });
+});
+
+describe('avisos', () => {
+  const base = { date: MON, items: [{ id: 'a', title: 'Clientes', time: '10:00', done: false }], due: [{ id: 'x', text: 'Pagar luz', due: MON }], closed: false };
+  it('desactivados no avisan', () => {
+    expect(dueReminders(DEFAULT_NOTIFY, { ...base, nowHHMM: '08:40' })).toHaveLength(0);
+  });
+  it('mañana con vencimientos, tarea con hora y cierre', () => {
+    const p = { ...DEFAULT_NOTIFY, enabled: true };
+    expect(dueReminders(p, { ...base, nowHHMM: '08:40' })[0].body).toContain('Pagar luz');
+    expect(dueReminders(p, { ...base, nowHHMM: '09:52' }).some((r) => r.title.startsWith('En 8 min'))).toBe(true);
+    expect(dueReminders(p, { ...base, nowHHMM: '21:05' }).some((r) => r.key.endsWith('evening'))).toBe(true);
+    expect(dueReminders(p, { ...base, closed: true, nowHHMM: '21:05' }).some((r) => r.key.endsWith('evening'))).toBe(false);
+  });
+});

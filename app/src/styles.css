@@ -13,8 +13,22 @@
   --radius: 12px;
   color-scheme: light;
 }
+:root[data-theme="dark"] {
+    --bg: #111314;
+    --card: #1a1d1f;
+    --text: #ebeced;
+    --muted: #9aa0a6;
+    --line: #2b2f33;
+    --accent: #5cc493;
+    --accent-soft: #173226;
+    --warn: #f0b44c;
+    --warn-soft: #2e2512;
+    --bad: #f28b82;
+    --bad-soft: #3a1c1a;
+    color-scheme: dark;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111314;
     --card: #1a1d1f;
     --text: #ebeced;
@@ -65,7 +79,8 @@ button {
 }
 button:disabled { opacity: .4; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-@media (prefers-color-scheme: dark) { button.primary { color: #08140e; } }
+:root[data-theme="dark"] button.primary { color: #08140e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) button.primary { color: #08140e; } }
 button.primary.outline { background: transparent; color: var(--accent); }
 button.ghost { background: transparent; }
 button.small { padding: 4px 10px; min-height: 34px; font-size: 14px; }
@@ -192,3 +207,6 @@ input[type='range'] { padding: 0; accent-color: var(--accent); }
 .sync-dot.local { background: var(--muted); }
 .children { margin-top: 4px; }
 .wrap { flex-wrap: wrap; }
+
+:root[data-theme="light"] { color-scheme: light; }
+.auth-msg { background: var(--warn-soft); color: var(--text); padding: 8px 10px; border-radius: 8px; }

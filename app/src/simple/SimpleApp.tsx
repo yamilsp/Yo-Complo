@@ -2,13 +2,14 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from '../lib/store';
 import { addDays, daysBetween, pretty, range, today, weekStart } from '../lib/dates';
 import {
-  AREA, AREA_RANK, EMPTY_LOG, FOCUS_BLOCK_MIN, GRACE_MIN, delivCoach, delivState, needsDeliverable, EXCUSE_FIX, EXCUSE_LABEL, EXPERIMENT_TEMPLATE, PROFILE_ID, QUADRANT_LABEL,
+  AREA, AREA_RANK, EMPTY_LOG, dueCoach, dueLabel, guessDue, quadrantWithDue, FOCUS_BLOCK_MIN, GRACE_MIN, delivCoach, delivState, needsDeliverable, EXCUSE_FIX, EXCUSE_LABEL, EXPERIMENT_TEMPLATE, PROFILE_ID, QUADRANT_LABEL,
   cajaStreak, dayName, defaultResults, eventsForDate, gcalLink, generatePlan, guessArea, logCoach, planId, replan,
   simpleCoach, splitTasks, suggestQuadrant, weekId, weeklyNeeded, withDefaults,
   type Area, type CalEvent, type Deliverable, type ChangeReason, type DayLog, type DayPlan, type Excuse, type Energy, type FixedTask,
   type Note, type PlanItem, type Profile, type Quadrant, type WeekRec,
 } from '../lib/simple';
 import { NumInput, toast } from '../ui';
+import { DEFAULT_NOTIFY, dueReminders, getNotifyPrefs, notifyOnce, notifySupported, requestNotifyPermission, saveNotifyPrefs, type NotifyPrefs } from '../lib/notify';
 import { Wizard } from './Wizard';
 import { Assistant } from './Assistant';
 import { SettingsScreen } from '../screens/Settings';
@@ -32,6 +33,7 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
   const [{ tab, intent }, setNav] = useState(readIntent);
   const [wizard, setWizard] = useState(false);
   const setTab = (t: Tab) => setNav({ tab: t, intent: null });
+  useReminders();
 
   if (!stored || wizard) {
     return (
@@ -52,6 +54,7 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
         {tab === 'ajustes' && (
           <div>
             <h1 className="s-h1">Ajustes</h1>
+            <NotifySettings />
             <CalendarSettings p={profile} />
             <div className="s-card">
               <button className="s-btn tonal block" onClick={() => setWizard(true)}>Rehacer el test</button>
@@ -73,6 +76,26 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
       </nav>
     </div>
   );
+}
+
+/** Revisa cada 30 s si hay que avisar algo (mañana, cierre, tareas con hora). */
+function useReminders() {
+  const s = useStore();
+  useEffect(() => {
+    const tick = () => {
+      const prefs = getNotifyPrefs();
+      if (!prefs.enabled) return;
+      const d = today();
+      const plan = s.get('splan', planId(d));
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const due = s.all('snote').filter((n) => n.status === 'open' && n.due && n.quadrant !== 'eliminar').map((n) => ({ id: n.id, text: n.text, due: n.due! }));
+      for (const r of dueReminders(prefs, { date: d, nowHHMM: hhmm, items: plan?.items ?? [], due, closed: !!plan?.closed })) notifyOnce(r.key, r.title, r.body);
+    };
+    tick();
+    const t = setInterval(tick, 30000);
+    return () => clearInterval(t);
+  }, [s]);
 }
 
 function useDayPlan(p: Profile, date: string): DayPlan | undefined {
@@ -119,7 +142,7 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
   const plan = useDayPlan(p, d);
   const plans = s.all('splan');
   const weeks = s.all('sweek');
-  const insights = [...delivCoach(s.all('sdeliv'), d), ...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
+  const insights = [...dueCoach(s.all('snote'), d), ...delivCoach(s.all('sdeliv'), d), ...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
   const streak = cajaStreak(plans, d);
   const week = s.get('sweek', weekId(weekStart(d)));
   const cal = useCalendar(p.icalUrl, d);
@@ -213,6 +236,8 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
         </section>
       )}
 
+      <DueCard />
+
       <section className="s-card">
         <div className="s-sec-head"><h2>Primero: caja</h2><small className="s-muted">lo que genera plata</small></div>
         {caja.sort(byTime).map(Row)}
@@ -249,6 +274,35 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
       {close && <CloseSheet plan={plan} p={p} onClose={() => setClose(false)} />}
       {change && <ChangeSheet plan={plan} onClose={() => setChange(false)} />}
     </div>
+  );
+}
+
+/** Fechas límite cercanas (vencidas, hoy y próximos 2 días) desde Ordenar. */
+function DueCard() {
+  const s = useStore();
+  const d = today();
+  const list = s.all('snote').filter((n) => n.status === 'open' && n.due && n.due <= addDays(d, 2) && n.quadrant !== 'eliminar').sort((a, b) => a.due!.localeCompare(b.due!));
+  if (!list.length) return null;
+  const toToday = (n: Note) => {
+    const plan = s.get('splan', planId(d));
+    if (!plan) return;
+    setItems(s, plan, [...plan.items, { id: n.id + '-t', area: n.area ?? 'extra', title: n.text, min: 'Empezar 2 minutos', minutes: 30, done: false }]);
+    s.update('snote', n.id, { status: 'done' });
+    toast('Agregada a Hoy');
+  };
+  return (
+    <section className="s-card s-due">
+      <div className="s-sec-head"><h2>Fechas límite</h2><small className="s-muted">próximos 2 días</small></div>
+      {list.map((n) => {
+        const l = dueLabel(n.due!, d);
+        return (
+          <div key={n.id} className="s-note">
+            <span className="small"><span className={'s-dot ' + AREA[n.area ?? 'extra'].color} /> {n.text} <b className={'s-due-' + l.tone}>· {l.text}</b></span>
+            <button className="s-btn text small" onClick={() => toToday(n)}>A hoy</button>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
@@ -314,6 +368,7 @@ function Focus({ plan, onClose }: { plan: DayPlan; onClose: () => void }) {
 
   const secs = Math.floor((now - start) / 1000);
   const left = FOCUS_BLOCK_MIN * 60 - secs;
+  if (left <= 0 && left > -2) notifyOnce('block-' + start, 'Bloque de foco cumplido', `${it.title}: pausa de 5 minutos lejos de la pantalla.`);
   const spentNow = Math.floor(secs / 60);
   const logSpent = () => deliv && spentNow > 0 && s.update('sdeliv', deliv.id, { spentMin: deliv.spentMin + spentNow });
   const mark = () => {
@@ -581,7 +636,7 @@ function Week({ p }: { p: Profile }) {
   const plans = s.all('splan');
   const need = weeklyNeeded(p);
   const target = Math.round((p.incomeTarget ?? 4_000_000) / 4.33);
-  const insights = [...delivCoach(s.all('sdeliv'), d), ...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
+  const insights = [...dueCoach(s.all('snote'), d), ...delivCoach(s.all('sdeliv'), d), ...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
   const [change, setChange] = useState(w?.change ?? '');
   if (!w) return null;
 
@@ -828,7 +883,8 @@ function Organize() {
     if (!tasks.length) return;
     for (const t of tasks) {
       const area = guessArea(t);
-      s.create('snote', { kind: 'snote', text: t, area, quadrant: suggestQuadrant(t, area), status: 'open' });
+      const due = guessDue(t, today());
+      s.create('snote', { kind: 'snote', text: t, area, quadrant: quadrantWithDue(suggestQuadrant(t, area), due, today()), due, status: 'open' });
     }
     setText('');
     toast(`${tasks.length} ${tasks.length === 1 ? 'tarea ordenada' : 'tareas ordenadas'}. Tocá una para corregirla.`);
@@ -864,7 +920,7 @@ function Organize() {
             {notes.filter((n) => n.quadrant === q).sort(sortQ).map((n) => (
               <button key={n.id} className="s-qitem" onClick={() => setSel(n)}>
                 <span className={'s-dot ' + AREA[n.area ?? 'extra'].color} />
-                {n.text}
+                <span>{n.text}{n.due && <small className={'s-due-' + dueLabel(n.due, today()).tone}> · {dueLabel(n.due, today()).text}</small>}</span>
               </button>
             ))}
           </section>
@@ -895,14 +951,52 @@ function Organize() {
               <button key={a} className={'s-pill' + (sel.area === a ? ' on' : '')} onClick={() => { s.update('snote', sel.id, { area: a }); setSel({ ...sel, area: a }); }}>{AREA[a].label}</button>
             ))}
           </div>
+          <label className="s-label">Fecha límite</label>
+          <input className="s-input" type="date" value={sel.due ?? ''} onChange={(e) => { const due = e.target.value || undefined; s.update('snote', sel.id, { due }); setSel({ ...sel, due }); }} />
           <button className="s-btn filled block" onClick={() => toToday(sel)}>Pasar a Hoy</button>
-          <a className="s-btn tonal block s-center-text" target="_blank" rel="noreferrer" href={gcalLink(sel.text, addDays(today(), 1), '10:00', 30)}>Agendar en Google Calendar</a>
+          <a className="s-btn tonal block s-center-text" target="_blank" rel="noreferrer" href={gcalLink(sel.text, sel.due ?? addDays(today(), 1), '10:00', 30)}>{sel.due ? 'Recordatorio en Google Calendar' : 'Agendar en Google Calendar'}</a>
           <button className="s-btn text block" onClick={() => { s.update('snote', sel.id, { status: sel.quadrant === 'eliminar' ? 'archived' : 'done' }); setSel(null); toast('Listo. Una cosa menos en la cabeza.'); }}>
             {sel.quadrant === 'eliminar' ? 'Soltar (eliminar)' : 'Ya está hecha'}
           </button>
         </Sheet>
       )}
     </div>
+  );
+}
+
+function NotifySettings() {
+  const [p, setP] = useState<NotifyPrefs>(getNotifyPrefs);
+  const [perm, setPerm] = useState(notifySupported() ? Notification.permission : 'denied');
+  const up = (x: Partial<NotifyPrefs>) => {
+    const n = { ...p, ...x };
+    setP(n);
+    saveNotifyPrefs(n);
+  };
+  const enable = async (on: boolean) => {
+    if (!on) return up({ enabled: false });
+    const r = await requestNotifyPermission();
+    setPerm(r);
+    if (r === 'granted') {
+      up({ enabled: true });
+      notifyOnce('test-' + Date.now(), 'Avisos activados', 'Así te vamos a avisar.');
+    } else toast('Android bloqueó los avisos. Activalos en Ajustes del teléfono → Apps → Chrome → Notificaciones.');
+  };
+  return (
+    <section className="s-card">
+      <div className="s-sec-head"><h2>Avisos</h2><small className="s-muted">{p.enabled && perm === 'granted' ? 'activados' : 'desactivados'}</small></div>
+      {!notifySupported() ? (
+        <p className="s-muted small">Este navegador no permite avisos. Instalá la app desde Chrome.</p>
+      ) : (
+        <>
+          <label className="s-toggle-row"><input type="checkbox" checked={p.enabled && perm === 'granted'} onChange={(e) => enable(e.target.checked)} /><span><b>Activar avisos</b>: planificar a la mañana, cerrar el día a la noche y {p.beforeMin} min antes de cada tarea con hora.</span></label>
+          <div className="s-grid2">
+            <div><label className="s-label">Mañana</label><input className="s-input" type="time" value={p.morning} onChange={(e) => up({ morning: e.target.value || DEFAULT_NOTIFY.morning })} /></div>
+            <div><label className="s-label">Cierre</label><input className="s-input" type="time" value={p.evening} onChange={(e) => up({ evening: e.target.value || DEFAULT_NOTIFY.evening })} /></div>
+          </div>
+          <p className="s-muted small">Importante: el teléfono solo deja avisar si la app estuvo abierta hace poco. Para un recordatorio que llegue sí o sí a una hora exacta, usá "Recordatorio en Google Calendar" en la tarea.</p>
+        </>
+      )}
+    </section>
   );
 }
 

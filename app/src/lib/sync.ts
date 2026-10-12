@@ -17,9 +17,11 @@ export interface SyncState {
   lastSync: number | null;
   error: string | null;
   email: string | null;
+  /** Se abrió el link de "olvidé mi contraseña": hay que pedir la nueva. */
+  recovery: boolean;
 }
 
-let state: SyncState = { mode: 'local', busy: false, lastSync: null, error: null, email: null };
+let state: SyncState = { mode: 'local', busy: false, lastSync: null, error: null, email: null, recovery: false };
 const listeners = new Set<() => void>();
 const set = (p: Partial<SyncState>) => {
   state = { ...state, ...p };
@@ -68,8 +70,9 @@ function getClient(): SupabaseClient | null {
   const cfg = getConfig();
   if (!cfg) return null;
   client = createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true } });
-  client.auth.onAuthStateChange((_e, s) => {
+  client.auth.onAuthStateChange((event, s) => {
     session = s;
+    if (event === 'PASSWORD_RECOVERY') set({ recovery: true });
     set({ mode: s ? 'ready' : 'signed_out', email: s?.user.email ?? null });
     if (s) void syncNow();
   });
@@ -85,9 +88,28 @@ export async function initSync() {
   if (session) await syncNow();
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function validate(email: string, password?: string) {
+  if (!EMAIL_RE.test(email.trim())) throw new Error('Revisá el email: tiene que ser del tipo nombre@gmail.com, sin espacios.');
+  if (password !== undefined && password.length < 6) throw new Error('La contraseña tiene que tener al menos 6 caracteres.');
+}
+
+/** Si el link de confirmación vuelve con error (vencido o ya usado), lo mostramos en vez de fallar en silencio. */
+export function readAuthRedirectError(): string | null {
+  const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const q = new URLSearchParams(location.search);
+  const desc = h.get('error_description') || q.get('error_description');
+  if (!desc) return null;
+  history.replaceState(null, '', location.pathname);
+  return /expired|invalid/i.test(desc)
+    ? 'El link del email venció o ya se usó. Probá "Iniciar sesión"; si no entra, tocá "Reenviar email de confirmación".'
+    : desc;
+}
+
 export async function signIn(email: string, password: string) {
   const c = getClient();
   if (!c) throw new Error('Primero configurá Supabase.');
+  validate(email, password);
   const { error } = await c.auth.signInWithPassword({ email: email.trim(), password });
   if (error) throw new Error(translateAuth(error.message));
 }
@@ -95,9 +117,42 @@ export async function signIn(email: string, password: string) {
 export async function signUp(email: string, password: string): Promise<string> {
   const c = getClient();
   if (!c) throw new Error('Primero configurá Supabase.');
+  validate(email, password);
   const { data, error } = await c.auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: window.location.origin } });
   if (error) throw new Error(translateAuth(error.message));
-  return data.session ? 'Cuenta creada y sesión iniciada.' : 'Cuenta creada. Revisá tu email para confirmarla y después iniciá sesión.';
+  if (data.session) return 'Cuenta creada y sesión iniciada.';
+  // Supabase no avisa si el email ya existe: devuelve un usuario sin identidades y no manda email.
+  if (data.user && (data.user.identities?.length ?? 0) === 0)
+    throw new Error('Ese email ya tiene cuenta. Tocá "Ya tengo cuenta" e iniciá sesión. Si no recordás la contraseña, usá "Olvidé mi contraseña".');
+  return 'Te mandamos un email para confirmar la cuenta (mirá también en spam). Tocá el link y volvé a "Ya tengo cuenta".';
+}
+
+export async function resendConfirmation(email: string): Promise<string> {
+  const c = getClient();
+  if (!c) throw new Error('Primero configurá Supabase.');
+  validate(email);
+  const { error } = await c.auth.resend({ type: 'signup', email: email.trim(), options: { emailRedirectTo: window.location.origin } });
+  if (error) throw new Error(translateAuth(error.message));
+  return 'Listo: te reenviamos el email de confirmación.';
+}
+
+export async function resetPassword(email: string): Promise<string> {
+  const c = getClient();
+  if (!c) throw new Error('Primero configurá Supabase.');
+  validate(email);
+  const { error } = await c.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+  if (error) throw new Error(translateAuth(error.message));
+  return 'Te mandamos un email para elegir una contraseña nueva. Abrilo desde este mismo dispositivo.';
+}
+
+export async function updatePassword(password: string): Promise<string> {
+  const c = getClient();
+  if (!c) throw new Error('Primero configurá Supabase.');
+  if (password.length < 6) throw new Error('La contraseña tiene que tener al menos 6 caracteres.');
+  const { error } = await c.auth.updateUser({ password });
+  if (error) throw new Error(translateAuth(error.message));
+  set({ recovery: false });
+  return 'Contraseña actualizada. Ya estás adentro.';
 }
 
 export async function signOut() {

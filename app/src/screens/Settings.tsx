@@ -1,10 +1,11 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { useStore } from '../lib/store';
 import { getSettings, saveSettings } from '../lib/model';
-import { clearConfig, getConfig, saveConfig, signIn, signOut, signUp, subscribeSync, syncNow, syncState } from '../lib/sync';
+import { clearConfig, getConfig, readAuthRedirectError, resendConfirmation, resetPassword, saveConfig, signIn, signOut, signUp, subscribeSync, syncNow, syncState, updatePassword } from '../lib/sync';
 import { CSV_KINDS, download, exportCSV, exportJSON, parseBackup } from '../lib/export';
 import { today } from '../lib/dates';
 import { Field, NumInput, toast } from '../ui';
+import { getTheme, setTheme, type Theme } from '../lib/theme';
 
 export function SettingsScreen({ simple, onSimple }: { simple?: boolean; onSimple?: () => void } = {}) {
   const s = useStore();
@@ -15,16 +16,23 @@ export function SettingsScreen({ simple, onSimple }: { simple?: boolean; onSimpl
   const [key, setKey] = useState(cfg?.key ?? '');
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
-  const [msg, setMsg] = useState('');
+  const [msg, setMsg] = useState(() => readAuthRedirectError() ?? '');
+  const [authTab, setAuthTab] = useState<'signup' | 'signin'>('signin');
+  const [showPass, setShowPass] = useState(false);
+  const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [theme, setThemeState] = useState<Theme>(getTheme);
 
   const run = async (f: () => Promise<unknown> | unknown) => {
     setMsg('');
+    setBusy(true);
     try {
       const r = await f();
       if (typeof r === 'string') setMsg(r);
     } catch (e) {
       setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -47,6 +55,15 @@ export function SettingsScreen({ simple, onSimple }: { simple?: boolean; onSimpl
           <button className="primary block" onClick={onSimple}>Volver al modo simple</button>
         </section>
       )}
+
+      <section className="card">
+        <h3>Apariencia</h3>
+        <div className="chips">
+          {([['system', 'Como el teléfono'], ['light', 'Claro'], ['dark', 'Oscuro']] as [Theme, string][]).map(([t, l]) => (
+            <button key={t} type="button" className={'chip' + (theme === t ? ' on' : '')} onClick={() => { setTheme(t); setThemeState(t); }}>{l}</button>
+          ))}
+        </div>
+      </section>
 
       {!simple && <section className="card">
         <h3>Planificación</h3>
@@ -78,13 +95,33 @@ export function SettingsScreen({ simple, onSimple }: { simple?: boolean; onSimpl
         )}
         {st.mode === 'signed_out' && (
           <>
-            <p className="small muted">Usá el mismo email y contraseña en el celular y en la compu.</p>
-            <Field label="Email"><input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-            <Field label="Contraseña"><input type="password" autoComplete="current-password" value={pass} onChange={(e) => setPass(e.target.value)} /></Field>
-            <div className="actions left">
-              <button className="primary" onClick={() => run(() => signIn(email, pass))}>Iniciar sesión</button>
-              <button className="ghost" onClick={() => run(() => signUp(email, pass))}>Crear cuenta</button>
+            <p className="small muted">Una sola cuenta para el celular y la compu. Tus datos quedan guardados y sincronizados.</p>
+            <div className="chips">
+              <button type="button" className={'chip' + (authTab === 'signin' ? ' on' : '')} onClick={() => { setAuthTab('signin'); setMsg(''); }}>Ya tengo cuenta</button>
+              <button type="button" className={'chip' + (authTab === 'signup' ? ' on' : '')} onClick={() => { setAuthTab('signup'); setMsg(''); }}>Crear cuenta</button>
             </div>
+            <Field label="Email"><input type="email" inputMode="email" autoComplete="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+            <Field label={authTab === 'signup' ? 'Contraseña (mínimo 6 caracteres)' : 'Contraseña'}>
+              <input type={showPass ? 'text' : 'password'} autoComplete={authTab === 'signup' ? 'new-password' : 'current-password'} value={pass} onChange={(e) => setPass(e.target.value)} />
+            </Field>
+            <label className="toggle"><input type="checkbox" checked={showPass} onChange={(e) => setShowPass(e.target.checked)} /><span>Mostrar contraseña</span></label>
+            <div className="actions left">
+              {authTab === 'signin' ? (
+                <button className="primary" disabled={busy} onClick={() => run(() => signIn(email, pass))}>{busy ? 'Entrando…' : 'Iniciar sesión'}</button>
+              ) : (
+                <button className="primary" disabled={busy} onClick={() => run(() => signUp(email, pass))}>{busy ? 'Creando…' : 'Crear cuenta'}</button>
+              )}
+            </div>
+            <div className="actions left">
+              <button className="ghost small" disabled={busy} onClick={() => run(() => resetPassword(email))}>Olvidé mi contraseña</button>
+              <button className="ghost small" disabled={busy} onClick={() => run(() => resendConfirmation(email))}>Reenviar email de confirmación</button>
+            </div>
+          </>
+        )}
+        {st.recovery && (
+          <>
+            <Field label="Contraseña nueva"><input type="password" autoComplete="new-password" value={pass} onChange={(e) => setPass(e.target.value)} /></Field>
+            <button className="primary" disabled={busy} onClick={() => run(() => updatePassword(pass))}>Guardar contraseña</button>
           </>
         )}
         {st.mode === 'ready' && (
@@ -95,7 +132,7 @@ export function SettingsScreen({ simple, onSimple }: { simple?: boolean; onSimpl
           </div>
         )}
         {st.mode !== 'local' && <button className="ghost small danger" onClick={() => confirm('¿Desconectar Supabase en este dispositivo? Los datos locales se mantienen.') && clearConfig()}>Desconectar Supabase</button>}
-        {msg && <p className="small">{msg}</p>}
+        {msg && <p className="small auth-msg" role="status">{msg}</p>}
       </section>
 
       <section className="card">

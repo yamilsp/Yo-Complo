@@ -110,6 +110,8 @@ export interface Note extends Base {
   quadrant?: Quadrant;
   area?: Area;
   status: 'open' | 'done' | 'archived';
+  /** Fecha límite real (YYYY-MM-DD). */
+  due?: string;
 }
 
 export const planId = (date: string) => 'splan-' + date;
@@ -730,4 +732,60 @@ export function delivCoach(delivs: Deliverable[], today: string): Insight[] {
     });
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Fechas límite                                                        */
+/* ------------------------------------------------------------------ */
+
+const DOW_ES: [RegExp, number][] = [
+  [/\bdomingo\b/i, 0], [/\blunes\b/i, 1], [/\bmartes\b/i, 2], [/\bmi[eé]rcoles\b/i, 3],
+  [/\bjueves\b/i, 4], [/\bviernes\b/i, 5], [/\bs[aá]bado\b/i, 6],
+];
+
+/** Detecta una fecha límite escrita en la tarea: "hoy", "mañana", "el viernes", "15/10". */
+export function guessDue(text: string, today: string): string | undefined {
+  if (/\bhoy\b/i.test(text)) return today;
+  if (/\bpasado ma[nñ]ana\b/i.test(text)) return addDays(today, 2);
+  if (/\bma[nñ]ana\b/i.test(text)) return addDays(today, 1);
+  const m = text.match(/\b(\d{1,2})\/(\d{1,2})\b/);
+  if (m) {
+    const y = Number(today.slice(0, 4));
+    const cand = `${y}-${String(+m[2]).padStart(2, '0')}-${String(+m[1]).padStart(2, '0')}`;
+    if (+m[2] >= 1 && +m[2] <= 12 && +m[1] >= 1 && +m[1] <= 31) return cand < today ? `${y + 1}${cand.slice(4)}` : cand;
+  }
+  for (const [re, dow] of DOW_ES) {
+    if (re.test(text)) {
+      const diff = (dow - fromISO(today).getDay() + 7) % 7;
+      return addDays(today, diff === 0 ? 7 : diff);
+    }
+  }
+  return undefined;
+}
+
+/** Con fecha límite en 2 días o menos, lo importante pasa a "Hacer hoy". */
+export function quadrantWithDue(q: Quadrant, due: string | undefined, today: string): Quadrant {
+  if (!due || q === 'idea' || q === 'eliminar') return q;
+  const soon = daysBetween(today, due) <= 2;
+  if (soon && q === 'agendar') return 'hacer';
+  return q;
+}
+
+export function dueLabel(due: string, today: string): { text: string; tone: 'late' | 'soon' | 'ok' } {
+  const d = daysBetween(today, due);
+  if (d < 0) return { text: `venció hace ${-d} d`, tone: 'late' };
+  if (d === 0) return { text: 'vence hoy', tone: 'soon' };
+  if (d === 1) return { text: 'vence mañana', tone: 'soon' };
+  return { text: `vence en ${d} d`, tone: d <= 3 ? 'soon' : 'ok' };
+}
+
+export function dueCoach(notes: Note[], today: string): Insight[] {
+  const late = notes.filter((n) => n.status === 'open' && n.due && n.due < today && n.quadrant !== 'eliminar');
+  if (!late.length) return [];
+  return [{
+    id: 'due_late', level: 2,
+    title: `${late.length === 1 ? 'Una fecha límite vencida' : late.length + ' fechas límite vencidas'}`,
+    evidence: late.slice(0, 3).map((n) => n.text).join(' · '),
+    fixes: ['Decidí hoy cada una: hacerla (pasala a Hoy), reprogramarla con fecha nueva o soltarla.', 'Una fecha vencida que se arrastra genera ruido mental todos los días.'],
+  }];
 }

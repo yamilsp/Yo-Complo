@@ -53,6 +53,6 @@ export function buildContext(s: Store, p: Profile): string {
   const insights = [...delivCoach(s.all('sdeliv'), d), ...simpleCoach(p, plans, s.all('sweek'), d), ...logCoach(p, plans, d)];
   if (insights.length) lines.push(`Alertas del coach: ${insights.map((i) => `${i.title} (${i.evidence})`).join(' | ')}.`);
   const notes = s.all('snote').filter((n) => n.status === 'open');
-  if (notes.length) lines.push(`Pendientes en Ordenar: ${notes.slice(0, 25).map((n) => `${n.text} [${QUADRANT_LABEL[n.quadrant ?? 'idea'].title}]`).join('; ')}.`);
+  if (notes.length) lines.push(`Pendientes en Ordenar: ${notes.slice(0, 25).map((n) => `${n.text} [${QUADRANT_LABEL[n.quadrant ?? 'idea'].title}${n.due ? `, vence ${n.due}` : ''}]`).join('; ')}.`);
   return lines.join('\n');
 }
