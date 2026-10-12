@@ -95,7 +95,7 @@ export async function signIn(email: string, password: string) {
 export async function signUp(email: string, password: string): Promise<string> {
   const c = getClient();
   if (!c) throw new Error('Primero configurá Supabase.');
-  const { data, error } = await c.auth.signUp({ email: email.trim(), password });
+  const { data, error } = await c.auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: window.location.origin } });
   if (error) throw new Error(translateAuth(error.message));
   return data.session ? 'Cuenta creada y sesión iniciada.' : 'Cuenta creada. Revisá tu email para confirmarla y después iniciá sesión.';
 }
@@ -192,4 +192,12 @@ export function startAutoSync() {
   window.addEventListener('online', () => void syncNow());
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void syncNow());
   setInterval(() => void syncNow(), 60000);
+}
+
+/** Token de la sesión actual (para llamar a funciones propias como el asistente). */
+export async function getAccessToken(): Promise<string | null> {
+  const c = getClient();
+  if (!c) return null;
+  const { data } = await c.auth.getSession();
+  return data.session?.access_token ?? null;
 }

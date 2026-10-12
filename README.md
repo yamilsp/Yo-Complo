@@ -11,6 +11,7 @@ App web instalable (PWA) que conecta objetivos → metas de 30 días → proyect
 - **Tareas fijas** con día y hora (marketing, finanzas, casa, viandas…) y botón "Cambió el día" (lluvia, más trabajo, imprevisto).
 - **Registro diario** en el cierre: mensajes a clientes, horas enfocadas, evento social, celular de ocio, gym, sueño. El coach propone cómo bajar la fricción de los hábitos buenos y subirla en los malos.
 - **Google Calendar**: "Agregar a Google Calendar" en cada tarea (sin configuración) y lectura de eventos con la dirección secreta iCal (función `app/api/ical.js` en Vercel).
+- **Asistente** (pestaña ✦): chat con Claude Haiku 5.5 vía `app/api/chat.js`. Conoce tus metas, plan y registro; propone acciones (Hoy u Ordenar con su cuadrante) que confirmás con "Aplicar". Requiere `ANTHROPIC_API_KEY` en Vercel y sesión iniciada; opcional `ALLOWED_EMAILS`.
 - **Atajos del ícono** (mantener apretado): ¿Qué hago ahora?, Registrar el día, Ordenar.
 - **Coach** basado en *Hábitos Atómicos* y *El Efecto Compuesto*: detecta en qué venís fallando y qué excusa repetís, y propone cómo facilitarlo.
 

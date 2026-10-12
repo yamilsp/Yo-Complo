@@ -10,9 +10,10 @@ import {
 } from '../lib/simple';
 import { NumInput, toast } from '../ui';
 import { Wizard } from './Wizard';
+import { Assistant } from './Assistant';
 import { SettingsScreen } from '../screens/Settings';
 
-type Tab = 'hoy' | 'semana' | 'ordenar' | 'ajustes';
+type Tab = 'hoy' | 'semana' | 'ordenar' | 'asistente' | 'ajustes';
 type Intent = 'ahora' | 'registrar' | null;
 
 /** Atajos del ícono (manifest): ?go=ahora | registrar | ordenar */
@@ -20,6 +21,7 @@ function readIntent(): { tab: Tab; intent: Intent } {
   const go = new URLSearchParams(location.search).get('go');
   if (go) history.replaceState(null, '', location.pathname);
   if (go === 'ordenar') return { tab: 'ordenar', intent: null };
+  if (go === 'asistente') return { tab: 'asistente', intent: null };
   if (go === 'ahora' || go === 'registrar') return { tab: 'hoy', intent: go };
   return { tab: 'hoy', intent: null };
 }
@@ -46,6 +48,7 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
         {tab === 'hoy' && <Today p={profile} intent={intent} goWeek={() => setTab('semana')} />}
         {tab === 'semana' && <Week p={profile} />}
         {tab === 'ordenar' && <Organize />}
+        {tab === 'asistente' && <Assistant p={profile} />}
         {tab === 'ajustes' && (
           <div>
             <h1 className="s-h1">Ajustes</h1>
@@ -61,7 +64,7 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
         )}
       </main>
       <nav className="s-nav">
-        {([['hoy', 'Hoy', '☀'], ['semana', 'Semana', '▦'], ['ordenar', 'Ordenar', '⊞'], ['ajustes', 'Ajustes', '⚙']] as [Tab, string, string][]).map(([id, l, i]) => (
+        {([['hoy', 'Hoy', '☀'], ['semana', 'Semana', '▦'], ['ordenar', 'Ordenar', '⊞'], ['asistente', 'Asistente', '✦'], ['ajustes', 'Ajustes', '⚙']] as [Tab, string, string][]).map(([id, l, i]) => (
           <button key={id} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); window.scrollTo(0, 0); }}>
             <span className="s-nav-ic">{i}</span>
             {l}
