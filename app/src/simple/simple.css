@@ -255,3 +255,13 @@ body:has(.s-app) { background: var(--s-bg, #f8f9fc); }
 .s-quote span { font-style: normal; font-size: 12px; white-space: nowrap; }
 .s-top { align-items: flex-start; }
 button.s-cell { border: 0; padding: 0; cursor: pointer; }
+
+/* --- Arrastrar y soltar --- */
+.s-qitem { touch-action: pan-y; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.s-qitem.dragging { opacity: .35; }
+.s-dragging .s-quad, .s-dragging .s-ideas { transition: outline-color .1s, transform .1s; outline: 2px dashed transparent; outline-offset: -2px; }
+.s-quad.over, .s-ideas.over { outline: 2px dashed var(--s-primary) !important; transform: scale(1.02); }
+.s-drag-ghost { position: fixed; z-index: 60; pointer-events: none; transform: translate(-50%, -120%); background: var(--s-surface); color: var(--s-text); border-radius: 12px; padding: 8px 12px; font-size: 14px; max-width: 70vw; box-shadow: 0 6px 20px rgba(0,0,0,.25); display: flex; flex-direction: column; gap: 2px; }
+.s-drag-ghost small { color: var(--s-primary); font-weight: 600; }
+.s-idea-add { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
+.s-idea-add .s-input { resize: none; line-height: 1.4; }

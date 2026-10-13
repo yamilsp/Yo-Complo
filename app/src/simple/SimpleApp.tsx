@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useStore } from '../lib/store';
 import { addDays, daysBetween, pretty, range, today, weekStart } from '../lib/dates';
 import {
@@ -921,23 +921,106 @@ export function FixedEditor({ p, compact }: { p: Profile; compact?: boolean }) {
   );
 }
 
-/** Asistente para ordenar: pegás tareas, se sugieren área y cuadrante, vos corregís con un toque. */
+type DropZone = Quadrant;
+
+/**
+ * Arrastrar y soltar con el dedo o el mouse. En pantalla táctil se activa con una pulsación
+ * larga (para no pelearse con el scroll); con mouse, al mover el puntero.
+ */
+function useDragDrop(onDrop: (id: string, zone: DropZone) => void) {
+  const [drag, setDrag] = useState<{ id: string; text: string; x: number; y: number; over: DropZone | null } | null>(null);
+  const justDragged = useRef(false);
+
+  const start = (e: React.PointerEvent, id: string, text: string) => {
+    if (e.button !== 0) return;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    let active = false;
+    let x = sx;
+    let y = sy;
+    const zoneAt = (px: number, py: number): DropZone | null =>
+      ((document.elementFromPoint(px, py) as HTMLElement | null)?.closest('[data-drop]') as HTMLElement | null)?.dataset.drop as DropZone | null ?? null;
+    const activate = () => {
+      active = true;
+      navigator.vibrate?.(15);
+      setDrag({ id, text, x, y, over: zoneAt(x, y) });
+    };
+    const timer = e.pointerType === 'mouse' ? undefined : setTimeout(activate, 260);
+    const blockScroll = (ev: TouchEvent) => active && ev.preventDefault();
+    const move = (ev: PointerEvent) => {
+      x = ev.clientX;
+      y = ev.clientY;
+      if (!active) {
+        if (Math.hypot(x - sx, y - sy) > 8) {
+          if (e.pointerType === 'mouse') activate();
+          else return cleanup();
+        } else return;
+      }
+      // Cerca del borde, la página se desplaza para llegar a cuadrantes fuera de vista.
+      if (y < 90) window.scrollBy(0, -14);
+      else if (y > window.innerHeight - 150) window.scrollBy(0, 14);
+      setDrag((d) => (d ? { ...d, x, y, over: zoneAt(x, y) } : d));
+    };
+    const up = () => {
+      if (active) {
+        const z = zoneAt(x, y);
+        if (z) onDrop(id, z);
+        justDragged.current = true;
+        setTimeout(() => (justDragged.current = false), 50);
+      }
+      cleanup();
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cleanup);
+      document.removeEventListener('touchmove', blockScroll);
+      setDrag(null);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cleanup);
+    document.addEventListener('touchmove', blockScroll, { passive: false });
+  };
+
+  return { drag, start, justDragged };
+}
+
+/** Asistente para ordenar: pegás tareas, se sugieren área y cuadrante, vos corregís con un toque o arrastrando. */
 function Organize() {
   const s = useStore();
   const notes = s.all('snote').filter((n) => n.status === 'open');
   const [text, setText] = useState('');
+  const [ideaText, setIdeaText] = useState('');
   const [sel, setSel] = useState<Note | null>(null);
+  const { drag, start, justDragged } = useDragDrop((id, zone) => {
+    const n = s.get('snote', id);
+    if (!n || n.quadrant === zone) return;
+    s.update('snote', id, { quadrant: zone });
+    toast(`Movida a "${QUADRANT_LABEL[zone].title}"`);
+  });
 
   const add = () => {
     const tasks = splitTasks(text);
     if (!tasks.length) return;
-    for (const t of tasks) {
+    for (const raw of tasks) {
+      const isIdea = /^idea\s*:/i.test(raw);
+      const t = raw.replace(/^idea\s*:\s*/i, '');
       const area = guessArea(t);
       const due = guessDue(t, today());
-      s.create('snote', { kind: 'snote', text: t, area, quadrant: quadrantWithDue(suggestQuadrant(t, area), due, today()), due, status: 'open' });
+      s.create('snote', { kind: 'snote', text: t, area, quadrant: isIdea ? 'idea' : quadrantWithDue(suggestQuadrant(t, area), due, today()), due, status: 'open' });
     }
     setText('');
-    toast(`${tasks.length} ${tasks.length === 1 ? 'tarea ordenada' : 'tareas ordenadas'}. Tocá una para corregirla.`);
+    toast(`${tasks.length} ${tasks.length === 1 ? 'tarea ordenada' : 'tareas ordenadas'}. Mantené apretada una para arrastrarla.`);
+  };
+
+  const addIdeas = () => {
+    const ideas = splitTasks(ideaText);
+    if (!ideas.length) return;
+    for (const t of ideas) s.create('snote', { kind: 'snote', text: t.replace(/^idea\s*:\s*/i, ''), area: guessArea(t), quadrant: 'idea', status: 'open' });
+    setIdeaText('');
+    toast(ideas.length === 1 ? 'Idea guardada en espera' : `${ideas.length} ideas guardadas en espera`);
   };
 
   const toToday = (n: Note) => {
@@ -953,39 +1036,57 @@ function Organize() {
   const Q: Quadrant[] = ['hacer', 'agendar', 'delegar', 'eliminar'];
   const sortQ = (a: Note, b: Note) => AREA_RANK[a.area ?? 'extra'] - AREA_RANK[b.area ?? 'extra'];
   const hacer = notes.filter((n) => n.quadrant === 'hacer').length;
+  const ideas = notes.filter((n) => n.quadrant === 'idea' || !n.quadrant);
+
+  const Item = (n: Note) => (
+    <button
+      key={n.id}
+      className={'s-qitem' + (drag?.id === n.id ? ' dragging' : '')}
+      onPointerDown={(e) => start(e, n.id, n.text)}
+      onClick={() => !justDragged.current && setSel(n)}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <span className={'s-dot ' + AREA[n.area ?? 'extra'].color} />
+      <span>{n.text}{n.due && <small className={'s-due-' + dueLabel(n.due, today()).tone}> · {dueLabel(n.due, today()).text}</small>}</span>
+    </button>
+  );
 
   return (
-    <div>
+    <div className={drag ? 's-dragging' : ''}>
       <h1 className="s-h1">Ordenar</h1>
       <p className="s-muted">Escribí o pegá todo lo que tenés en la cabeza, una cosa por línea. También podés dictar con el micrófono del teclado.</p>
       <textarea className="s-input s-dump" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={'Mandar presupuesto a Laura\nLavar el auto\nCumple de Martín el viernes\nIdea: app para jardineros'} />
       <button className="s-btn filled block" onClick={add} disabled={!text.trim()}>Ordenar</button>
 
       {hacer > 3 && <p className="s-callout small">Tenés {hacer} cosas en "Hacer hoy". Eisenhower funciona si "Hacer" es corto: dejá 3 y pasá el resto a "Agendar".</p>}
+      {notes.length > 0 && <p className="s-help">Tocá una tarea para editarla. <b>Mantenela apretada y arrastrala</b> para cambiarla de cuadrante.</p>}
 
       <div className="s-matrix">
         {Q.map((q) => (
-          <section key={q} className={'s-quad q-' + q}>
+          <section key={q} data-drop={q} className={'s-quad q-' + q + (drag?.over === q ? ' over' : '')}>
             <div className="s-quad-head"><b>{QUADRANT_LABEL[q].title}</b><small>{QUADRANT_LABEL[q].hint}</small></div>
-            {notes.filter((n) => n.quadrant === q).sort(sortQ).map((n) => (
-              <button key={n.id} className="s-qitem" onClick={() => setSel(n)}>
-                <span className={'s-dot ' + AREA[n.area ?? 'extra'].color} />
-                <span>{n.text}{n.due && <small className={'s-due-' + dueLabel(n.due, today()).tone}> · {dueLabel(n.due, today()).text}</small>}</span>
-              </button>
-            ))}
+            {notes.filter((n) => n.quadrant === q).sort(sortQ).map(Item)}
           </section>
         ))}
       </div>
 
-      {notes.some((n) => n.quadrant === 'idea' || !n.quadrant) && (
-        <section className="s-card">
-          <div className="s-sec-head"><h2>Ideas en espera</h2><small className="s-muted">no compiten con tu plan</small></div>
-          {notes.filter((n) => n.quadrant === 'idea' || !n.quadrant).map((n) => (
-            <button key={n.id} className="s-qitem" onClick={() => setSel(n)}><span className={'s-dot ' + AREA[n.area ?? 'extra'].color} />{n.text}</button>
-          ))}
-        </section>
-      )}
+      <section data-drop="idea" className={'s-card s-ideas' + (drag?.over === 'idea' ? ' over' : '')}>
+        <div className="s-sec-head"><h2>Ideas en espera</h2><small className="s-muted">{ideas.length ? `${ideas.length} · ` : ''}no compiten con tu plan</small></div>
+        <p className="s-help">Anotá todas las que quieras, una por línea. No se pierden y no te distraen: se revisan el domingo.</p>
+        {ideas.map(Item)}
+        <div className="s-idea-add">
+          <textarea className="s-input" rows={Math.min(4, Math.max(1, ideaText.split('\n').length))} value={ideaText} onChange={(e) => setIdeaText(e.target.value)} placeholder="Nueva idea (podés pegar varias, una por línea)" />
+          <button className="s-btn tonal" onClick={addIdeas} disabled={!ideaText.trim()}>Guardar</button>
+        </div>
+      </section>
       {notes.length === 0 && <p className="s-muted small s-center">Cabeza vacía. Volvé a Hoy y hacé lo que importa.</p>}
+
+      {drag && (
+        <div className="s-drag-ghost" style={{ left: drag.x, top: drag.y }}>
+          {drag.text}
+          {drag.over && <small>→ {QUADRANT_LABEL[drag.over].title}</small>}
+        </div>
+      )}
 
       {sel && (
         <Sheet title={sel.text} onClose={() => setSel(null)}>
@@ -1006,7 +1107,7 @@ function Organize() {
           <button className="s-btn filled block" onClick={() => toToday(sel)}>Pasar a Hoy</button>
           <a className="s-btn tonal block s-center-text" target="_blank" rel="noreferrer" href={gcalLink(sel.text, sel.due ?? addDays(today(), 1), '10:00', 30)}>{sel.due ? 'Recordatorio en Google Calendar' : 'Agendar en Google Calendar'}</a>
           <button className="s-btn text block" onClick={() => { s.update('snote', sel.id, { status: sel.quadrant === 'eliminar' ? 'archived' : 'done' }); setSel(null); toast('Listo. Una cosa menos en la cabeza.'); }}>
-            {sel.quadrant === 'eliminar' ? 'Soltar (eliminar)' : 'Ya está hecha'}
+            {sel.quadrant === 'eliminar' ? 'Soltar (eliminar)' : sel.quadrant === 'idea' ? 'Descartar idea' : 'Ya está hecha'}
           </button>
         </Sheet>
       )}
