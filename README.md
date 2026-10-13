@@ -15,6 +15,8 @@ App web instalable (PWA) que conecta objetivos → metas de 30 días → proyect
 - **Asistente** (pestaña ✦): chat con Claude Haiku 5.5 vía `app/api/chat.js`. Conoce tus metas, plan y registro; propone acciones (Hoy u Ordenar con su cuadrante) que confirmás con "Aplicar". Requiere `ANTHROPIC_API_KEY` en Vercel y sesión iniciada; opcional `ALLOWED_EMAILS`.
 - **Fechas límite**: Ordenar detecta "hoy", "mañana", "el viernes" o "20/12"; lo importante que vence en ≤2 días pasa a Hacer hoy. Hoy muestra las próximas y el coach marca las vencidas.
 - **Avisos** (Ajustes): planificar a la mañana, cerrar el día a la noche y 10 min antes de tareas con hora (mientras la app estuvo abierta hace poco); para recordatorios garantizados, Google Calendar.
+- **Días anteriores**: en Hoy, "‹ Anterior" (hasta 60 días) o tocando un día en Semana → Efecto compuesto. Se marcan tareas y se carga el cierre; mirar un día no lo registra como incumplido.
+- **Frase del día** de *Hábitos Atómicos* y *El Efecto Compuesto* (paráfrasis en castellano), distinta cada día.
 - **Tema** claro / oscuro / como el teléfono (Ajustes → Apariencia).
 - **Atajos del ícono** (mantener apretado): ¿Qué hago ahora?, Registrar el día, Ordenar.
 - **Coach** basado en *Hábitos Atómicos* y *El Efecto Compuesto*: detecta en qué venís fallando y qué excusa repetís, y propone cómo facilitarlo.

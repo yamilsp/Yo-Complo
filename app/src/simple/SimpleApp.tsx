@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from '../lib/store';
 import { addDays, daysBetween, pretty, range, today, weekStart } from '../lib/dates';
 import {
@@ -12,13 +12,14 @@ import { NumInput, toast } from '../ui';
 import { DEFAULT_NOTIFY, dueReminders, getNotifyPrefs, notifyOnce, notifySupported, requestNotifyPermission, saveNotifyPrefs, type NotifyPrefs } from '../lib/notify';
 import { Wizard } from './Wizard';
 import { Assistant } from './Assistant';
+import { quoteForDate } from '../lib/quotes';
 import { SettingsScreen } from '../screens/Settings';
 
 type Tab = 'hoy' | 'semana' | 'ordenar' | 'asistente' | 'ajustes';
 type Intent = 'ahora' | 'registrar' | null;
 
 /** Atajos del ícono (manifest): ?go=ahora | registrar | ordenar */
-function readIntent(): { tab: Tab; intent: Intent } {
+function readIntent(): { tab: Tab; intent: Intent; date?: string } {
   const go = new URLSearchParams(location.search).get('go');
   if (go) history.replaceState(null, '', location.pathname);
   if (go === 'ordenar') return { tab: 'ordenar', intent: null };
@@ -30,7 +31,8 @@ function readIntent(): { tab: Tab; intent: Intent } {
 export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
   const s = useStore();
   const stored = s.get('sprofile', PROFILE_ID);
-  const [{ tab, intent }, setNav] = useState(readIntent);
+  const [nav, setNav] = useState(readIntent);
+  const { tab, intent } = nav;
   const [wizard, setWizard] = useState(false);
   const setTab = (t: Tab) => setNav({ tab: t, intent: null });
   useReminders();
@@ -47,8 +49,8 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
   return (
     <div className="s-app">
       <main className="s-main">
-        {tab === 'hoy' && <Today p={profile} intent={intent} goWeek={() => setTab('semana')} />}
-        {tab === 'semana' && <Week p={profile} goRegister={() => setNav({ tab: 'hoy', intent: 'registrar' })} />}
+        {tab === 'hoy' && <Today key={nav.date ?? 'hoy'} p={profile} intent={intent} initialDate={nav.date} goWeek={() => setTab('semana')} />}
+        {tab === 'semana' && <Week p={profile} goRegister={() => setNav({ tab: 'hoy', intent: 'registrar' })} goDay={(date) => { setNav({ tab: 'hoy', intent: null, date }); window.scrollTo(0, 0); }} />}
         {tab === 'ordenar' && <Organize />}
         {tab === 'asistente' && <Assistant p={profile} />}
         {tab === 'ajustes' && (
@@ -98,17 +100,29 @@ function useReminders() {
   }, [s]);
 }
 
+/**
+ * Plan del día. Hoy (y futuro) se guarda al abrirlo. Un día pasado sin datos se muestra
+ * como borrador y se guarda recién cuando cargás algo: mirar no cuenta como incumplir.
+ */
 function useDayPlan(p: Profile, date: string): DayPlan | undefined {
   const s = useStore();
-  const plan = s.get('splan', planId(date));
+  const stored = s.get('splan', planId(date));
+  const isPast = date < today();
+  const draft = useMemo<DayPlan>(() => ({ id: planId(date), kind: 'splan', date, items: generatePlan(p, date), closed: false, createdAt: 0, updatedAt: 0 }), [date, p]);
   useEffect(() => {
-    if (!s.get('splan', planId(date))) s.create('splan', { id: planId(date), kind: 'splan', date, items: generatePlan(p, date), closed: false });
-  }, [date, p, s]);
-  return plan;
+    if (!isPast && !s.get('splan', planId(date))) s.create('splan', { id: planId(date), kind: 'splan', date, items: generatePlan(p, date), closed: false });
+  }, [date, p, s, isPast]);
+  return stored ?? (isPast ? draft : undefined);
+}
+
+/** Guarda cambios del plan; si era un borrador de un día pasado, lo crea. */
+function savePlan(s: ReturnType<typeof useStore>, plan: DayPlan, patch: Partial<DayPlan>) {
+  if (s.get('splan', plan.id)) s.update('splan', plan.id, patch);
+  else s.create('splan', { id: plan.id, kind: 'splan', date: plan.date, items: plan.items, closed: plan.closed, ...patch });
 }
 
 function setItems(s: ReturnType<typeof useStore>, plan: DayPlan, items: PlanItem[]) {
-  s.update('splan', plan.id, { items });
+  savePlan(s, plan, { items });
 }
 
 const fmtMin = (m: number) => (m <= 0 ? '' : m >= 60 ? `${Math.round((m / 60) * 10) / 10} h`.replace('.', ',') : `${m} min`);
@@ -136,16 +150,27 @@ function useCalendar(url: string | undefined, date: string) {
   return state;
 }
 
-function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () => void }) {
+const MAX_BACK_DAYS = 60;
+
+function Today({ p, intent, goWeek, initialDate }: { p: Profile; intent: Intent; goWeek: () => void; initialDate?: string }) {
   const s = useStore();
-  const d = today();
+  const realToday = today();
+  const [d, setD] = useState(initialDate && initialDate <= realToday ? initialDate : realToday);
+  const isPast = d < realToday;
   const plan = useDayPlan(p, d);
   const plans = s.all('splan');
   const weeks = s.all('sweek');
-  const insights = [...dueCoach(s.all('snote'), d), ...delivCoach(s.all('sdeliv'), d), ...simpleCoach(p, plans, weeks, d), ...logCoach(p, plans, d)].sort((a, b) => b.level - a.level);
-  const streak = cajaStreak(plans, d);
+  const insights = [...dueCoach(s.all('snote'), realToday), ...delivCoach(s.all('sdeliv'), realToday), ...simpleCoach(p, plans, weeks, realToday), ...logCoach(p, plans, realToday)].sort((a, b) => b.level - a.level);
+  const streak = cajaStreak(plans, realToday);
   const week = s.get('sweek', weekId(weekStart(d)));
-  const cal = useCalendar(p.icalUrl, d);
+  const cal = useCalendar(isPast ? undefined : p.icalUrl, d);
+  const quote = quoteForDate(d);
+  const go = (n: number) => {
+    const next = addDays(d, n);
+    if (next > realToday || next < addDays(realToday, -MAX_BACK_DAYS)) return;
+    setD(next);
+    window.scrollTo(0, 0);
+  };
   const [focus, setFocus] = useState(intent === 'ahora');
   const [edit, setEdit] = useState<PlanItem | 'new' | null>(null);
   const [close, setClose] = useState(intent === 'registrar');
@@ -159,7 +184,7 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
   const fixed = plan.items.filter((i) => i.area === 'fijo').sort(byTime);
   const done = plan.items.filter((i) => i.done).length;
   const hour = new Date().getHours();
-  const sunday = new Date().getDay() === 0;
+  const sunday = !isPast && new Date().getDay() === 0;
   const toggle = (it: PlanItem) => setItems(s, plan, plan.items.map((x) => (x.id === it.id ? { ...x, done: !x.done } : x)));
   const top = insights[0];
 
@@ -180,10 +205,17 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
 
   return (
     <div>
+      <div className="s-daynav">
+        <button className="s-btn text small" onClick={() => go(-1)} disabled={d <= addDays(realToday, -MAX_BACK_DAYS)} aria-label="Día anterior">‹ Anterior</button>
+        <span className="s-muted">{pretty(d)}</span>
+        {isPast ? (
+          <button className="s-btn text small" onClick={() => go(1)} aria-label="Día siguiente">Siguiente ›</button>
+        ) : <span className="s-daynav-spacer" />}
+      </div>
       <header className="s-top">
         <div>
-          <p className="s-muted">{pretty(d)}</p>
-          <h1 className="s-h1">{hour < 13 ? 'Buen día' : hour < 20 ? 'Buenas tardes' : 'Buenas noches'}</h1>
+          <h1 className="s-h1">{isPast ? (d === addDays(realToday, -1) ? 'Ayer' : 'Día anterior') : hour < 13 ? 'Buen día' : hour < 20 ? 'Buenas tardes' : 'Buenas noches'}</h1>
+          <p className="s-quote">“{quote.text}” <span>— {quote.source}</span></p>
         </div>
         <div className="s-streak" title="Días seguidos con al menos una acción de caja">
           <b>{streak}</b>
@@ -198,19 +230,27 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
         </div>
       )}
 
-      {!plan.energy && (
+      {isPast && (
+        <div className="s-card s-tonal">
+          <b>Estás cargando un día anterior</b>
+          <p className="small">Marcá lo que hiciste y tocá <b>{plan.closed ? 'Editar cierre' : 'Cerrar el día'}</b> para cargar el registro (mensajes, foco, celular, gym…).</p>
+          <button className="s-btn tonal small" onClick={() => { setD(realToday); window.scrollTo(0, 0); }}>Volver a hoy</button>
+        </div>
+      )}
+
+      {!isPast && !plan.energy && (
         <div className="s-card s-tonal">
           <b>¿Cómo arrancás hoy?</b>
           <div className="s-pills">
             {([['bien', 'Bien'], ['normal', 'Normal'], ['bajo', 'Sin energía']] as [Energy, string][]).map(([e, l]) => (
-              <button key={e} className="s-pill" onClick={() => s.update('splan', plan.id, { energy: e })}>{l}</button>
+              <button key={e} className="s-pill" onClick={() => savePlan(s, plan, { energy: e })}>{l}</button>
             ))}
           </div>
         </div>
       )}
       {low && <p className="s-callout">Día de energía baja: solo versiones mínimas. Cuentan igual. Mañana volvés al plan completo.</p>}
 
-      {top && (
+      {!isPast && top && (
         <div className={'s-card s-coach lvl' + top.level} onClick={() => setOpen(!open)}>
           <div className="s-coach-title">{top.title}</div>
           <p className="s-muted small">{top.evidence}</p>
@@ -224,7 +264,7 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
         </div>
       )}
 
-      <button className="s-btn filled big block" onClick={() => setFocus(true)}>¿Qué hago ahora?</button>
+      {!isPast && <button className="s-btn filled big block" onClick={() => setFocus(true)}>¿Qué hago ahora?</button>}
 
       {p.icalUrl && (cal.events.length > 0 || cal.error) && (
         <section className="s-card s-outline">
@@ -236,7 +276,7 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
         </section>
       )}
 
-      <DueCard />
+      {!isPast && <DueCard />}
 
       <section className="s-card">
         <div className="s-sec-head"><h2>Primero: caja</h2><small className="s-muted">lo que genera plata</small></div>
@@ -263,8 +303,8 @@ function Today({ p, intent, goWeek }: { p: Profile; intent: Intent; goWeek: () =
       )}
 
       <div className="s-row2">
-        <button className="s-btn tonal" onClick={() => setChange(true)}>Cambió el día</button>
-        <button className={'s-btn ' + (hour >= 18 ? 'filled' : 'tonal')} onClick={() => setClose(true)}>
+        {!isPast ? <button className="s-btn tonal" onClick={() => setChange(true)}>Cambió el día</button> : <span />}
+        <button className={'s-btn ' + (hour >= 18 || isPast ? 'filled' : 'tonal')} onClick={() => setClose(true)}>
           {plan.closed ? 'Editar cierre' : 'Cerrar el día'}
         </button>
       </div>
@@ -321,7 +361,7 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
 function ChangeSheet({ plan, onClose }: { plan: DayPlan; onClose: () => void }) {
   const s = useStore();
   const apply = (r: ChangeReason) => {
-    s.update('splan', plan.id, { items: replan(plan.items, r, plan.date), changed: r });
+    savePlan(s, plan, { items: replan(plan.items, r, plan.date), changed: r });
     toast('Plan reacomodado.');
     onClose();
   };
@@ -410,7 +450,7 @@ function Focus({ plan, onClose }: { plan: DayPlan; onClose: () => void }) {
           <p>¿Qué está pasando? Sin culpa: es un dato.</p>
           <div className="s-pills">
             {(Object.entries(EXCUSE_LABEL) as [Excuse, string][]).map(([k, l]) => (
-              <button key={k} className="s-pill" onClick={() => { setExcuse(k); s.update('splan', plan.id, { excuse: k }); }}>{l}</button>
+              <button key={k} className="s-pill" onClick={() => { setExcuse(k); savePlan(s, plan, { excuse: k }); }}>{l}</button>
             ))}
           </div>
         </>
@@ -571,10 +611,10 @@ function CloseSheet({ plan, p, onClose }: { plan: DayPlan; p: Profile; onClose: 
   const missed = items.filter((i) => !i.done).length;
   const up = (x: Partial<DayLog>) => setLog((l) => ({ ...l, ...x }));
   const save = () => {
-    s.update('splan', plan.id, { items, excuse: missed ? excuse : undefined, closed: true, log });
+    savePlan(s, plan, { items, excuse: missed ? excuse : undefined, closed: true, log });
     // El plan de mañana se arma solo; lo no hecho de caja pasa primero.
     const tmr = addDays(plan.date, 1);
-    if (!s.get('splan', planId(tmr))) {
+    if (plan.date === today() && !s.get('splan', planId(tmr))) {
       const carry = items.filter((i) => !i.done && i.area === 'caja' && !/^Jornada/.test(i.title)).slice(0, 1).map((i) => ({ ...i, id: i.id + '-c', title: i.title.replace(/^(\(pendiente\) )?/, '(pendiente) ') }));
       s.create('splan', { id: planId(tmr), kind: 'splan', date: tmr, items: [...carry, ...generatePlan(p, tmr)], closed: false });
     }
@@ -627,7 +667,7 @@ function useWeek(p: Profile, ws: string): WeekRec | undefined {
 
 const fmtN = (n: number) => String(Math.round(n * 10) / 10).replace('.', ',');
 
-function Week({ p, goRegister }: { p: Profile; goRegister: () => void }) {
+function Week({ p, goRegister, goDay }: { p: Profile; goRegister: () => void; goDay: (date: string) => void }) {
   const s = useStore();
   const d = today();
   const ws = weekStart(d);
@@ -774,9 +814,9 @@ function Week({ p, goRegister }: { p: Profile; goRegister: () => void }) {
 
       <section className="s-card">
         <div className="s-sec-head"><h2>Efecto compuesto</h2><small className="s-muted">28 días · caja cumplida</small></div>
-        <p className="s-help">Se pinta solo: verde los días que marcaste al menos una tarea de <b>Primero: caja</b> en Hoy.</p>
+        <p className="s-help">Se pinta solo: verde los días que marcaste al menos una tarea de <b>Primero: caja</b> en Hoy. Tocá un día para verlo o cargarlo.</p>
         <div className="s-grid">
-          {grid.map((g) => <span key={g.x} title={g.x} className={'s-cell' + (g.ok ? ' ok' : g.any ? ' miss' : '')} />)}
+          {grid.map((g) => <button key={g.x} title={g.x} aria-label={'Ver ' + g.x} onClick={() => goDay(g.x)} className={'s-cell' + (g.ok ? ' ok' : g.any ? ' miss' : '')} />)}
         </div>
         <p className="s-muted small">Cada cuadrado verde es un día en que hiciste algo por la plata. Que no se corte dos días seguidos.</p>
       </section>

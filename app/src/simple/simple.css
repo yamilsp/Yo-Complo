@@ -246,3 +246,12 @@ body:has(.s-app) { background: var(--s-bg, #f8f9fc); }
 .s-due-ok { color: var(--s-muted); font-weight: 400; }
 .s-due .s-note span .s-dot { display: inline-block; margin: 0 4px 1px 0; }
 .s-help { font-size: 12.5px; color: var(--s-muted); margin: -2px 0 8px; line-height: 1.4; }
+
+/* --- Navegación de días y frase --- */
+.s-daynav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+.s-daynav .s-btn.small { padding: 4px 6px; }
+.s-daynav-spacer { width: 84px; }
+.s-quote { margin: 6px 0 0; font-size: 14px; line-height: 1.4; color: var(--s-muted); font-style: italic; max-width: 32ch; }
+.s-quote span { font-style: normal; font-size: 12px; white-space: nowrap; }
+.s-top { align-items: flex-start; }
+button.s-cell { border: 0; padding: 0; cursor: pointer; }
