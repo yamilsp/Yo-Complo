@@ -1,6 +1,6 @@
 {
-  "name": "Yo Complo",
-  "short_name": "Yo Complo",
+  "name": "Yo Cumplo",
+  "short_name": "Yo Cumplo",
   "description": "Sistema personal de ejecución",
   "start_url": "/",
   "display": "standalone",

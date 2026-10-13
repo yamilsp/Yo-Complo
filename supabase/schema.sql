@@ -1,4 +1,4 @@
--- Yo Complo: esquema de sincronización.
+-- Yo Cumplo: esquema de sincronización.
 -- Pegar completo en Supabase > SQL Editor > New query > Run. Se puede ejecutar más de una vez.
 
 create table if not exists public.yc_records (

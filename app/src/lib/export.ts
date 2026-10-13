@@ -4,7 +4,7 @@ import type { AnyRec, Kind } from './types';
 const KINDS: Kind[] = ['goal', 'project', 'task', 'idea', 'habit', 'habitLog', 'day', 'result', 'obstacle', 'review', 'reward', 'redemption', 'settings', 'sprofile', 'splan', 'sweek', 'snote', 'sdeliv'];
 
 export function exportJSON(s: Store): string {
-  return JSON.stringify({ app: 'yo-complo', version: 1, exportedAt: new Date().toISOString(), records: s.dump() }, null, 2);
+  return JSON.stringify({ app: 'yo-cumplo', version: 1, exportedAt: new Date().toISOString(), records: s.dump() }, null, 2);
 }
 
 /** Valida y devuelve los registros de un respaldo JSON. Lanza error legible si no es válido. */
@@ -16,7 +16,7 @@ export function parseBackup(text: string): AnyRec[] {
     throw new Error('El archivo no es un JSON válido.');
   }
   const recs = (data as { records?: unknown }).records;
-  if (!Array.isArray(recs)) throw new Error('No es un respaldo de Yo Complo (falta "records").');
+  if (!Array.isArray(recs)) throw new Error('No es un respaldo de Yo Cumplo (falta "records").');
   for (const r of recs) {
     const x = r as Partial<AnyRec>;
     if (typeof x.id !== 'string' || !KINDS.includes(x.kind as Kind) || typeof x.updatedAt !== 'number')

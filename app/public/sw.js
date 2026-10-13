@@ -1,5 +1,5 @@
 // Service worker mínimo: la app abre sin conexión. Red primero, caché como respaldo.
-const CACHE = 'yc-v2';
+const CACHE = 'yc-v3';
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/icon.svg', '/manifest.webmanifest'])));
   self.skipWaiting();

@@ -1,4 +1,4 @@
-// Función de Vercel: asistente de Yo Complo con Claude Haiku 5.5.
+// Función de Vercel: asistente de Yo Cumplo con Claude Haiku 5.5.
 // La clave ANTHROPIC_API_KEY vive solo en Vercel (variable de entorno), nunca en la app.
 // Solo responde a usuarios con sesión de Supabase (y, si se define, a los emails de ALLOWED_EMAILS).
 import Anthropic from '@anthropic-ai/sdk';
@@ -28,7 +28,7 @@ const Reply = z.object({
   ),
 });
 
-const SYSTEM = `Sos el asistente personal de Yo Complo, una app de ejecución. Hablás en castellano rioplatense (voseo), corto y directo.
+const SYSTEM = `Sos el asistente personal de Yo Cumplo, una app de ejecución. Hablás en castellano rioplatense (voseo), corto y directo.
 
 Tu trabajo: ayudar al usuario a decidir qué hacer, priorizar y cumplir. No motivás con frases vacías ni le das la razón: señalás con sus datos lo que está evitando y proponés acciones concretas y verificables.
 

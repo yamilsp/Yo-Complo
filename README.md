@@ -1,4 +1,4 @@
-# Yo Complo — sistema personal de ejecución
+# Yo Cumplo — sistema personal de ejecución
 
 App web instalable (PWA) que conecta objetivos → metas de 30 días → proyectos → acciones diarias, con coach basado en tus datos reales. Funciona en celular y computadora con los mismos datos (Supabase).
 

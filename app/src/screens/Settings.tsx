@@ -138,7 +138,7 @@ export function SettingsScreen({ simple, onSimple }: { simple?: boolean; onSimpl
       <section className="card">
         <h3>Respaldo y exportación</h3>
         <div className="actions left wrap">
-          <button className="ghost" onClick={() => download(`yo-complo-${today()}.json`, exportJSON(s), 'application/json')}>Respaldo JSON</button>
+          <button className="ghost" onClick={() => download(`yo-cumplo-${today()}.json`, exportJSON(s), 'application/json')}>Respaldo JSON</button>
           {CSV_KINDS.map(([k, name]) => (
             <button key={k} className="ghost small" onClick={() => download(`${name}-${today()}.csv`, exportCSV(s, k), 'text/csv')}>CSV {name}</button>
           ))}

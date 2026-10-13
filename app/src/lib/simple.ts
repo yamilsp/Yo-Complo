@@ -581,7 +581,7 @@ export function gcalLink(title: string, date: string, time: string, minutes: num
     text: title,
     dates: `${gcalStamp(date, time)}/${gcalStamp(date, time, Math.max(15, minutes))}`,
     ctz: 'America/Argentina/Buenos_Aires',
-    details: 'Creado desde Yo Complo',
+    details: 'Creado desde Yo Cumplo',
   });
   return 'https://calendar.google.com/calendar/render?' + q.toString();
 }
