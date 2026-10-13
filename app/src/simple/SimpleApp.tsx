@@ -48,7 +48,7 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
     <div className="s-app">
       <main className="s-main">
         {tab === 'hoy' && <Today p={profile} intent={intent} goWeek={() => setTab('semana')} />}
-        {tab === 'semana' && <Week p={profile} />}
+        {tab === 'semana' && <Week p={profile} goRegister={() => setNav({ tab: 'hoy', intent: 'registrar' })} />}
         {tab === 'ordenar' && <Organize />}
         {tab === 'asistente' && <Assistant p={profile} />}
         {tab === 'ajustes' && (
@@ -627,7 +627,7 @@ function useWeek(p: Profile, ws: string): WeekRec | undefined {
 
 const fmtN = (n: number) => String(Math.round(n * 10) / 10).replace('.', ',');
 
-function Week({ p }: { p: Profile }) {
+function Week({ p, goRegister }: { p: Profile; goRegister: () => void }) {
   const s = useStore();
   const d = today();
   const ws = weekStart(d);
@@ -674,6 +674,7 @@ function Week({ p }: { p: Profile }) {
       <h1 className="s-h1">Semana</h1>
       <section className="s-card">
         <div className="s-sec-head"><h2>Plata de la semana</h2><small className="s-muted">mín. $ {need.toLocaleString('es-AR')} · meta $ {target.toLocaleString('es-AR')}</small></div>
+        <p className="s-help">Lo escribís vos: cuánto cobraste en total esta semana. Actualizalo cuando cobres. Las barras comparan las últimas 4 semanas.</p>
         <NumInput value={w.income} onChange={(n) => s.update('sweek', w.id, { income: n })} placeholder="¿Cuánto entró esta semana?" />
         <div className="s-bars">
           {last4.map((x) => (
@@ -693,6 +694,8 @@ function Week({ p }: { p: Profile }) {
 
       <section className="s-card">
         <div className="s-sec-head"><h2>Registro de la semana</h2><small className="s-muted">{logs.length} días cargados</small></div>
+        <p className="s-help">Se llena solo con lo que cargás cada noche en <b>Hoy → Cerrar el día</b> (mensajes, horas de foco, evento, celular, gym, sueño).</p>
+        <button className="s-btn tonal small" onClick={goRegister}>Cargar el registro de hoy</button>
         <div className="s-kpis">
           <div><b>{sum((l) => l.messages)}</b><small>mensajes a clientes</small></div>
           <div><b>{fmtN(sum((l) => l.focusH))} h</b><small>trabajo enfocado</small></div>
@@ -706,6 +709,7 @@ function Week({ p }: { p: Profile }) {
       {insights.length > 0 && (
         <section className="s-card">
           <div className="s-sec-head"><h2>Coach</h2></div>
+        <p className="s-help">Alertas automáticas a partir de tus datos. Tocá una para ver cómo facilitarla.</p>
           {insights.map((i) => (
             <details key={i.id} className={'s-insight lvl' + i.level}>
               <summary><b>{i.title}</b><br /><small className="s-muted">{i.evidence}</small></summary>
@@ -717,6 +721,7 @@ function Week({ p }: { p: Profile }) {
 
       <section className="s-card">
         <div className="s-sec-head"><h2>3 resultados de la semana</h2></div>
+        <p className="s-help">Escribí (o corregí) los 3 resultados que harían que esta semana valga. Tocá el círculo cuando lo logres.</p>
         {w.results.map((r, i) => (
           <div key={i} className={'s-item' + (r.done ? ' done' : '')}>
             <button className="s-check green" onClick={() => s.update('sweek', w.id, { results: w.results.map((x, j) => (j === i ? { ...x, done: !x.done } : x)) })}>{r.done ? '✓' : ''}</button>
@@ -732,6 +737,7 @@ function Week({ p }: { p: Profile }) {
 
       <section className="s-card">
         <div className="s-sec-head"><h2>Experimento de ingreso extra</h2><small className="s-muted">uno a la vez</small></div>
+        <p className="s-help">Una idea de ingreso extra que probás 7 días. Aparece en Hoy los días libres. Al terminar decidís: seguir, cambiar o cortar.</p>
         {!exp ? (
           <>
             <p className="s-muted small">Sin experimento activo. Elegí una idea y probala 7 días.</p>
@@ -768,6 +774,7 @@ function Week({ p }: { p: Profile }) {
 
       <section className="s-card">
         <div className="s-sec-head"><h2>Efecto compuesto</h2><small className="s-muted">28 días · caja cumplida</small></div>
+        <p className="s-help">Se pinta solo: verde los días que marcaste al menos una tarea de <b>Primero: caja</b> en Hoy.</p>
         <div className="s-grid">
           {grid.map((g) => <span key={g.x} title={g.x} className={'s-cell' + (g.ok ? ' ok' : g.any ? ' miss' : '')} />)}
         </div>
@@ -776,6 +783,7 @@ function Week({ p }: { p: Profile }) {
 
       <section className="s-card">
         <div className="s-sec-head"><h2>Un cambio para la semana que viene</h2></div>
+        <p className="s-help">Elegí una sugerencia o escribí tu propio cambio. Uno solo.</p>
         {insights.slice(0, 3).map((i) => i.fixes[0]).map((f) => (
           <button key={f} className={'s-option' + (change === f ? ' on' : '')} onClick={() => { setChange(f); s.update('sweek', w.id, { change: f }); }}>{f}</button>
         ))}
@@ -804,6 +812,7 @@ function Deliverables() {
   return (
     <section className="s-card">
       <div className="s-sec-head"><h2>Entregas</h2><small className="s-muted">{seenWeek} personas lo vieron esta semana</small></div>
+        <p className="s-help">Se llena cuando usás "¿Qué hago ahora?" en un proyecto o contenido: versión 1, tiempo usado y cuánta gente lo vio.</p>
       {open.map((x) => {
         const st = delivState(x, d);
         return (
@@ -841,6 +850,7 @@ export function FixedEditor({ p, compact }: { p: Profile; compact?: boolean }) {
   return (
     <section className={compact ? '' : 's-card'}>
       {!compact && <div className="s-sec-head"><h2>Tareas fijas</h2><small className="s-muted">día y hora</small></div>}
+      {!compact && <p className="s-help">Cosas que se repiten cada semana. Aparecen solas en Hoy el día que les toca.</p>}
       {sorted.map((f) => (
         <div key={f.id} className="s-fixed">
           <div className="s-fixed-top">

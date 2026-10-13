@@ -54,7 +54,7 @@ function bad(res, code, msg) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return bad(res, 405, 'Método no permitido');
-  if (!process.env.ANTHROPIC_API_KEY) return bad(res, 500, 'Falta configurar ANTHROPIC_API_KEY en Vercel.');
+  if (!process.env.ANTHROPIC_API_KEY) return bad(res, 503, 'El asistente todavía no está activado: falta cargar la clave de Anthropic (ANTHROPIC_API_KEY) en Vercel y redeployar.');
 
   // Sesión de Supabase: evita que cualquiera use tu crédito.
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');

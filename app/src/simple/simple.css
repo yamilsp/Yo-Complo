@@ -245,3 +245,4 @@ body:has(.s-app) { background: var(--s-bg, #f8f9fc); }
 .s-due-soon { color: var(--s-orange); font-weight: 600; }
 .s-due-ok { color: var(--s-muted); font-weight: 400; }
 .s-due .s-note span .s-dot { display: inline-block; margin: 0 4px 1px 0; }
+.s-help { font-size: 12.5px; color: var(--s-muted); margin: -2px 0 8px; line-height: 1.4; }
