@@ -265,3 +265,21 @@ button.s-cell { border: 0; padding: 0; cursor: pointer; }
 .s-drag-ghost small { color: var(--s-primary); font-weight: 600; }
 .s-idea-add { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
 .s-idea-add .s-input { resize: none; line-height: 1.4; }
+
+/* --- Tareas fijas por día --- */
+.s-days { display: flex; flex-direction: column; gap: 8px; }
+.s-day { background: var(--s-bg); border-radius: 16px; padding: 10px 12px; }
+.s-day.today { outline: 2px solid var(--s-primary-soft); }
+.s-day-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.s-day-head small { margin-left: auto; }
+.s-day-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-top: 1px solid var(--s-line); }
+.s-day-row:first-of-type { border-top: 0; }
+.s-day-row .grow { flex: 1; min-width: 0; }
+.s-app .s-time { width: 128px; flex: none; padding: 6px 8px; }
+.s-day-add { padding-left: 0; }
+.s-day-new { border-top: 1px solid var(--s-line); }
+.s-day-item { border-top: 1px solid var(--s-line); padding: 6px 0 2px; }
+.s-day-item:first-of-type { border-top: 0; }
+.s-day-item .s-day-row { border-top: 0; padding: 0; }
+.s-app .s-day-title { min-height: 0; padding: 2px 0; font-size: 15px; field-sizing: content; resize: none; line-height: 1.35; }
+.s-day-del { margin-left: auto; }

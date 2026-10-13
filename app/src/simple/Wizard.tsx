@@ -6,6 +6,7 @@ import {
   type Excuse, type Profile, type Tone,
 } from '../lib/simple';
 import { NumInput } from '../ui';
+import { FixedByDay } from './FixedByDay';
 
 type Draft = Omit<Profile, 'id' | 'kind' | 'createdAt' | 'updatedAt'>;
 
@@ -172,20 +173,7 @@ export function Wizard({ onDone }: { onDone: () => void }) {
       sub: 'Te propongo estos días. Cambialos como te sirva. Lo que tiene lugar fijo no compite con lo demás.',
       body: (
         <>
-          {(p.fixed ?? []).map((f) => (
-            <div key={f.id} className="s-fixed">
-              <div className="s-fixed-top">
-                <input className="s-input flat" value={f.title} onChange={(e) => up({ fixed: p.fixed!.map((x) => (x.id === f.id ? { ...x, title: e.target.value } : x)) })} />
-                <button className="s-btn text small danger" onClick={() => up({ fixed: p.fixed!.filter((x) => x.id !== f.id) })} aria-label="Quitar">✕</button>
-              </div>
-              <div className="s-fixed-row">
-                <select className="s-input s-sel" value={f.day} onChange={(e) => up({ fixed: p.fixed!.map((x) => (x.id === f.id ? { ...x, day: Number(e.target.value) } : x)) })}>
-                  {WEEK.map(([v]) => <option key={v} value={v}>{dayName(v)}</option>)}
-                </select>
-                <input className="s-input s-sel" type="time" value={f.time} onChange={(e) => up({ fixed: p.fixed!.map((x) => (x.id === f.id ? { ...x, time: e.target.value } : x)) })} />
-              </div>
-            </div>
-          ))}
+          <FixedByDay list={p.fixed ?? []} onChange={(fixed) => up({ fixed })} />
           <p className="s-muted small">Podés agregar más después, en Semana.</p>
         </>
       ),

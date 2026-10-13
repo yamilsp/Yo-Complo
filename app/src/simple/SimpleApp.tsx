@@ -3,14 +3,15 @@ import { useStore } from '../lib/store';
 import { addDays, daysBetween, pretty, range, today, weekStart } from '../lib/dates';
 import {
   AREA, AREA_RANK, EMPTY_LOG, dueCoach, dueLabel, guessDue, quadrantWithDue, FOCUS_BLOCK_MIN, GRACE_MIN, delivCoach, delivState, needsDeliverable, EXCUSE_FIX, EXCUSE_LABEL, EXPERIMENT_TEMPLATE, PROFILE_ID, QUADRANT_LABEL,
-  cajaStreak, dayName, defaultResults, eventsForDate, gcalLink, generatePlan, guessArea, logCoach, planId, replan,
+  cajaStreak, defaultResults, eventsForDate, gcalLink, generatePlan, guessArea, logCoach, planId, replan,
   simpleCoach, splitTasks, suggestQuadrant, weekId, weeklyNeeded, withDefaults,
-  type Area, type CalEvent, type Deliverable, type ChangeReason, type DayLog, type DayPlan, type Excuse, type Energy, type FixedTask,
+  type Area, type CalEvent, type Deliverable, type ChangeReason, type DayLog, type DayPlan, type Excuse, type Energy,
   type Note, type PlanItem, type Profile, type Quadrant, type WeekRec,
 } from '../lib/simple';
 import { NumInput, toast } from '../ui';
 import { DEFAULT_NOTIFY, dueReminders, getNotifyPrefs, notifyOnce, notifySupported, requestNotifyPermission, saveNotifyPrefs, type NotifyPrefs } from '../lib/notify';
 import { Wizard } from './Wizard';
+import { FixedByDay } from './FixedByDay';
 import { Assistant } from './Assistant';
 import { quoteForDate } from '../lib/quotes';
 import { SettingsScreen } from '../screens/Settings';
@@ -872,51 +873,14 @@ function Deliverables() {
   );
 }
 
-const WEEK: [number, string][] = [[1, 'Lu'], [2, 'Ma'], [3, 'Mi'], [4, 'Ju'], [5, 'Vi'], [6, 'Sá'], [0, 'Do']];
-
-/** Tareas recurrentes con día y horario. Se pueden mandar al calendario como evento semanal. */
-export function FixedEditor({ p, compact }: { p: Profile; compact?: boolean }) {
+/** Tareas recurrentes con día y horario (guardadas en el perfil). */
+export function FixedEditor({ p }: { p: Profile }) {
   const s = useStore();
-  const list = p.fixed ?? [];
-  const [title, setTitle] = useState('');
-  const save = (fixed: FixedTask[]) => s.update('sprofile', PROFILE_ID, { fixed });
-  const upd = (id: string, x: Partial<FixedTask>) => save(list.map((f) => (f.id === id ? { ...f, ...x } : f)));
-  const sorted = [...list].sort((a, b) => ((a.day + 6) % 7) - ((b.day + 6) % 7) || a.time.localeCompare(b.time));
-  const nextDate = (day: number) => {
-    const t = today();
-    const diff = (day - new Date().getDay() + 7) % 7;
-    return addDays(t, diff);
-  };
   return (
-    <section className={compact ? '' : 's-card'}>
-      {!compact && <div className="s-sec-head"><h2>Tareas fijas</h2><small className="s-muted">día y hora</small></div>}
-      {!compact && <p className="s-help">Cosas que se repiten cada semana. Aparecen solas en Hoy el día que les toca.</p>}
-      {sorted.map((f) => (
-        <div key={f.id} className="s-fixed">
-          <div className="s-fixed-top">
-            <input className="s-input flat" value={f.title} onChange={(e) => upd(f.id, { title: e.target.value })} />
-            <button className="s-btn text small danger" onClick={() => save(list.filter((x) => x.id !== f.id))} aria-label="Quitar">✕</button>
-          </div>
-          <div className="s-fixed-row">
-            <select className="s-input s-sel" value={f.day} onChange={(e) => upd(f.id, { day: Number(e.target.value) })}>
-              {WEEK.map(([v]) => <option key={v} value={v}>{dayName(v)}</option>)}
-            </select>
-            <input className="s-input s-sel" type="time" value={f.time} onChange={(e) => upd(f.id, { time: e.target.value })} />
-            {!compact && (
-              <a className="s-btn text small" target="_blank" rel="noreferrer" href={gcalLink(f.title, nextDate(f.day), f.time, f.minutes) + '&recur=' + encodeURIComponent('RRULE:FREQ=WEEKLY')}>+ Calendar</a>
-            )}
-          </div>
-        </div>
-      ))}
-      <div className="s-search">
-        <input className="s-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Nueva tarea fija (ej.: pagar cuentas)" />
-        <button className="s-btn tonal" onClick={() => {
-          if (!title.trim()) return;
-          save([...list, { id: 'fx-' + Date.now().toString(36), title: title.trim(), day: 6, time: '10:00', minutes: 30 }]);
-          setTitle('');
-        }}>Agregar</button>
-      </div>
-      {!compact && <p className="s-muted small">Los cambios se aplican a los días que todavía no abriste. "+ Calendar" crea el evento semanal en Google Calendar.</p>}
+    <section className="s-card">
+      <div className="s-sec-head"><h2>Tareas fijas</h2><small className="s-muted">{(p.fixed ?? []).length} por semana</small></div>
+      <p className="s-help">Cosas que se repiten cada semana. Aparecen solas en Hoy el día que les toca. "+ Calendar" las crea como evento semanal en Google Calendar.</p>
+      <FixedByDay list={p.fixed ?? []} onChange={(fixed) => s.update('sprofile', PROFILE_ID, { fixed })} calendar />
     </section>
   );
 }
