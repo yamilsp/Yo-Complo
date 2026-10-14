@@ -112,6 +112,8 @@ export interface Note extends Base {
   status: 'open' | 'done' | 'archived';
   /** Fecha límite real (YYYY-MM-DD). */
   due?: string;
+  /** Por qué quedó en ese cuadrante (lo explica la IA). */
+  reason?: string;
 }
 
 export const planId = (date: string) => 'splan-' + date;

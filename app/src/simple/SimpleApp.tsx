@@ -14,6 +14,8 @@ import { Wizard } from './Wizard';
 import { FixedByDay } from './FixedByDay';
 import { Assistant } from './Assistant';
 import { quoteForDate } from '../lib/quotes';
+import { aiOrganize } from '../lib/organizeAI';
+import { buildContext } from '../lib/assistant';
 import { SettingsScreen } from '../screens/Settings';
 
 type Tab = 'hoy' | 'semana' | 'ordenar' | 'asistente' | 'ajustes';
@@ -52,7 +54,7 @@ export function SimpleApp({ onAdvanced }: { onAdvanced: () => void }) {
       <main className="s-main">
         {tab === 'hoy' && <Today key={nav.date ?? 'hoy'} p={profile} intent={intent} initialDate={nav.date} goWeek={() => setTab('semana')} />}
         {tab === 'semana' && <Week p={profile} goRegister={() => setNav({ tab: 'hoy', intent: 'registrar' })} goDay={(date) => { setNav({ tab: 'hoy', intent: null, date }); window.scrollTo(0, 0); }} />}
-        {tab === 'ordenar' && <Organize />}
+        {tab === 'ordenar' && <Organize p={profile} />}
         {tab === 'asistente' && <Assistant p={profile} />}
         {tab === 'ajustes' && (
           <div>
@@ -952,31 +954,71 @@ function useDragDrop(onDrop: (id: string, zone: DropZone) => void) {
 }
 
 /** Asistente para ordenar: pegás tareas, se sugieren área y cuadrante, vos corregís con un toque o arrastrando. */
-function Organize() {
+function Organize({ p }: { p: Profile }) {
   const s = useStore();
   const notes = s.all('snote').filter((n) => n.status === 'open');
   const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [summary, setSummary] = useState<{ text: string; ai: boolean } | null>(null);
   const [ideaText, setIdeaText] = useState('');
   const [sel, setSel] = useState<Note | null>(null);
   const { drag, start, justDragged } = useDragDrop((id, zone) => {
     const n = s.get('snote', id);
     if (!n || n.quadrant === zone) return;
-    s.update('snote', id, { quadrant: zone });
+    s.update('snote', id, { quadrant: zone, reason: undefined });
     toast(`Movida a "${QUADRANT_LABEL[zone].title}"`);
   });
 
-  const add = () => {
+  /** Reglas por palabras clave: respaldo cuando la IA no está disponible. */
+  const ruleBased = (raw: string) => {
+    const isIdea = /^idea\s*:/i.test(raw);
+    const t = raw.replace(/^idea\s*:\s*/i, '');
+    const area = guessArea(t);
+    const due = guessDue(t, today());
+    return { text: t, area, due, quadrant: isIdea ? ('idea' as Quadrant) : quadrantWithDue(suggestQuadrant(t, area), due, today()) };
+  };
+
+  const add = async () => {
     const tasks = splitTasks(text);
-    if (!tasks.length) return;
-    for (const raw of tasks) {
-      const isIdea = /^idea\s*:/i.test(raw);
-      const t = raw.replace(/^idea\s*:\s*/i, '');
-      const area = guessArea(t);
-      const due = guessDue(t, today());
-      s.create('snote', { kind: 'snote', text: t, area, quadrant: isIdea ? 'idea' : quadrantWithDue(suggestQuadrant(t, area), due, today()), due, status: 'open' });
+    if (!tasks.length || busy) return;
+    setBusy(true);
+    try {
+      const ai = await aiOrganize(tasks, buildContext(s, p));
+      const byIndex = new Map(ai.items.map((x) => [x.index, x]));
+      tasks.forEach((raw, i) => {
+        const x = byIndex.get(i);
+        if (x) s.create('snote', { kind: 'snote', text: x.text || raw, area: x.area, quadrant: x.quadrant, due: x.due || undefined, reason: x.reason, status: 'open' });
+        else s.create('snote', { kind: 'snote', ...ruleBased(raw), status: 'open' });
+      });
+      setSummary({ text: ai.summary, ai: true });
+      toast(`${tasks.length} ${tasks.length === 1 ? 'tarea ordenada' : 'tareas ordenadas'} con IA.`);
+    } catch (e) {
+      for (const raw of tasks) s.create('snote', { kind: 'snote', ...ruleBased(raw), status: 'open' });
+      setSummary({ text: `Ordené sin IA (${(e as Error).message}). Revisá los cuadrantes y movelos si hace falta.`, ai: false });
+    } finally {
+      setText('');
+      setBusy(false);
     }
-    setText('');
-    toast(`${tasks.length} ${tasks.length === 1 ? 'tarea ordenada' : 'tareas ordenadas'}. Mantené apretada una para arrastrarla.`);
+  };
+
+  /** Vuelve a evaluar todo lo pendiente con la IA (no toca el texto que escribiste). */
+  const reorderAll = async () => {
+    const open = notes.slice(0, 40);
+    if (!open.length || busy) return;
+    setBusy(true);
+    try {
+      const ai = await aiOrganize(open.map((n) => n.text + (n.due ? ` (fecha límite ${n.due})` : '')), buildContext(s, p));
+      for (const x of ai.items) {
+        const n = open[x.index];
+        if (n) s.update('snote', n.id, { area: x.area, quadrant: x.quadrant, due: x.due || n.due, reason: x.reason });
+      }
+      setSummary({ text: ai.summary, ai: true });
+      toast('Reordenado con IA.');
+    } catch (e) {
+      toast('No pude usar la IA: ' + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const addIdeas = () => {
@@ -1020,7 +1062,14 @@ function Organize() {
       <h1 className="s-h1">Ordenar</h1>
       <p className="s-muted">Escribí o pegá todo lo que tenés en la cabeza, una cosa por línea. También podés dictar con el micrófono del teclado.</p>
       <textarea className="s-input s-dump" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={'Mandar presupuesto a Laura\nLavar el auto\nCumple de Martín el viernes\nIdea: app para jardineros'} />
-      <button className="s-btn filled block" onClick={add} disabled={!text.trim()}>Ordenar</button>
+      <button className="s-btn filled block" onClick={add} disabled={!text.trim() || busy}>{busy ? 'Pensando…' : 'Ordenar con IA'}</button>
+      {notes.length > 1 && <button className="s-btn text block" onClick={reorderAll} disabled={busy}>Reordenar todo lo pendiente con IA</button>}
+      {summary && (
+        <div className={'s-card ' + (summary.ai ? 's-tonal' : 's-outline')}>
+          <small className="s-muted">{summary.ai ? '✦ Recomendación' : 'Aviso'}</small>
+          <p className="small" style={{ margin: '4px 0 0' }}>{summary.text}</p>
+        </div>
+      )}
 
       {hacer > 3 && <p className="s-callout small">Tenés {hacer} cosas en "Hacer hoy". Eisenhower funciona si "Hacer" es corto: dejá 3 y pasá el resto a "Agendar".</p>}
       {notes.length > 0 && <p className="s-help">Tocá una tarea para editarla. <b>Mantenela apretada y arrastrala</b> para cambiarla de cuadrante.</p>}
@@ -1054,10 +1103,11 @@ function Organize() {
 
       {sel && (
         <Sheet title={sel.text} onClose={() => setSel(null)}>
+          {sel.reason && <p className="s-callout small">✦ {sel.reason}</p>}
           <label className="s-label">Cuadrante</label>
           <div className="s-pills">
             {([...Q, 'idea'] as Quadrant[]).map((q) => (
-              <button key={q} className={'s-pill' + (sel.quadrant === q ? ' on' : '')} onClick={() => { s.update('snote', sel.id, { quadrant: q }); setSel({ ...sel, quadrant: q }); }}>{QUADRANT_LABEL[q].title}</button>
+              <button key={q} className={'s-pill' + (sel.quadrant === q ? ' on' : '')} onClick={() => { s.update('snote', sel.id, { quadrant: q, reason: undefined }); setSel({ ...sel, quadrant: q, reason: undefined }); }}>{QUADRANT_LABEL[q].title}</button>
             ))}
           </div>
           <label className="s-label">Área</label>

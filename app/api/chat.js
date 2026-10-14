@@ -3,11 +3,8 @@
 // Solo responde a usuarios con sesión de Supabase (y, si se define, a los emails de ALLOWED_EMAILS).
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://wdpdjnxoadtdeytraxun.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || 'sb_publishable_bcy1I7sP1Ek9UQQNgwAA8w_WQE64qpQ';
+import { anthropicError, bad, parseBody, requireUser } from './_auth.js';
 const MAX_TURNS = 20;
 const MAX_CHARS = 4000;
 
@@ -48,24 +45,10 @@ Reglas:
 - Las acciones son propuestas: el usuario las confirma en la app.
 - Tiende al perfeccionismo, a querer hacer todo a la vez y a invertir horas en cosas que nadie ve. Para proyectos o contenidos: proponé una versión 1 chica con tiempo máximo y a quién mostrársela antes de seguir. Una sola cosa por vez.`;
 
-function bad(res, code, msg) {
-  return res.status(code).json({ error: msg });
-}
-
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return bad(res, 405, 'Método no permitido');
-  if (!process.env.ANTHROPIC_API_KEY) return bad(res, 503, 'El asistente todavía no está activado: falta cargar la clave de Anthropic (ANTHROPIC_API_KEY) en Vercel y redeployar.');
+  if (!(await requireUser(req, res))) return;
 
-  // Sesión de Supabase: evita que cualquiera use tu crédito.
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  if (!token) return bad(res, 401, 'Iniciá sesión en Ajustes para usar el asistente.');
-  const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
-  const { data: userData, error: authError } = await sb.auth.getUser(token);
-  if (authError || !userData?.user) return bad(res, 401, 'Tu sesión venció. Volvé a iniciar sesión en Ajustes.');
-  const allowed = (process.env.ALLOWED_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (allowed.length && !allowed.includes((userData.user.email || '').toLowerCase())) return bad(res, 403, 'Este usuario no tiene acceso al asistente.');
-
-  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+  const body = parseBody(req);
   const history = Array.isArray(body.messages) ? body.messages : [];
   const context = typeof body.context === 'string' ? body.context.slice(0, 12000) : '';
   const turns = history
@@ -101,15 +84,6 @@ export default async function handler(req, res) {
     }));
     return res.status(200).json({ reply: out.reply, actions });
   } catch (error) {
-    if (error instanceof Anthropic.AuthenticationError) return bad(res, 500, 'La clave de Anthropic no es válida. Revisala en Vercel.');
-    if (error instanceof Anthropic.PermissionDeniedError) return bad(res, 500, 'La clave de Anthropic no tiene permiso para este modelo.');
-    if (error instanceof Anthropic.RateLimitError) return bad(res, 429, 'Demasiados mensajes seguidos. Esperá un minuto.');
-    if (error instanceof Anthropic.BadRequestError) {
-      const m = String(error.message || '');
-      if (/credit|balance|billing/i.test(m)) return bad(res, 402, 'Te quedaste sin crédito en Anthropic. Cargá saldo en console.anthropic.com → Billing.');
-      return bad(res, 400, 'Pedido inválido: ' + m.slice(0, 160));
-    }
-    if (error instanceof Anthropic.APIError) return bad(res, 502, `Error de Anthropic (${error.status}). Probá de nuevo.`);
-    return bad(res, 502, 'No se pudo contactar al asistente.');
+    return anthropicError(Anthropic, res, error);
   }
 }
